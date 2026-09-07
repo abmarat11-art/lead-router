@@ -1,7 +1,8 @@
 // Импорт строк из таблицы. Таблица — двусторонний канал:
 // пустой статус = новая компания в очередь; «в работе» / «отказ» ставит СРМ,
 // и мы обязаны это заметить на ближайшем проходе.
-import { mapHeaders, normalizeRow, normalizeStatus, rowHash } from './normalize.js';
+import { normalizeRow, normalizeStatus, rowHash } from './normalize.js';
+import { loadConfig } from './columns.js';
 import { markInWork, markDeclined, logEvent } from './queue.js';
 
 const nowIso = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -16,10 +17,10 @@ const leadValues = (lead, hash) => [
 ];
 
 /**
- * @param {{headers: string[], rows: {key: string, cells: any[]}[]}} batch
+ * @param {{rows: {key: string, cells: any[]}[]}} batch
+ * @param {object} [config] схема колонок; по умолчанию config/columns.json
  */
-export function importBatch(db, batch) {
-  const headerMap = mapHeaders(batch.headers);
+export function importBatch(db, batch, config = loadConfig()) {
   const stats = { seen: 0, created: 0, updated: 0, skipped: 0, quarantined: 0, duplicates: 0, in_work: 0, declined: 0 };
 
   const findByKey = db.prepare('SELECT * FROM leads WHERE source_key = ?');
@@ -31,7 +32,7 @@ export function importBatch(db, batch) {
     stats.seen++;
     const hash = rowHash(row.cells);
     const existing = findByKey.get(row.key);
-    const { lead, problems } = normalizeRow(row.cells, headerMap, batch.headers);
+    const { lead, problems } = normalizeRow(row.cells, config);
 
     if (existing) {
       if (existing.source_hash === hash) { stats.skipped++; continue; }
@@ -41,8 +42,8 @@ export function importBatch(db, batch) {
       logEvent(db, { leadId: existing.id, kind: 'source_row_changed', data: { source_key: row.key, status: lead.source_status } });
       stats.updated++;
 
-      const before = normalizeStatus(existing.source_status);
-      const after = normalizeStatus(lead.source_status);
+      const before = normalizeStatus(existing.source_status, config);
+      const after = normalizeStatus(lead.source_status, config);
       if (after !== before) {
         if (after === 'in_work') { markInWork(db, existing.id); stats.in_work++; }
         if (after === 'declined') { markDeclined(db, existing.id, 'отказ в таблице'); stats.declined++; }
@@ -51,7 +52,7 @@ export function importBatch(db, batch) {
     }
 
     // новая строка: распределяем только те, где статус пустой
-    const status = normalizeStatus(lead.source_status);
+    const status = normalizeStatus(lead.source_status, config);
     if (lead.dedup_key && findDup.get(lead.dedup_key, row.key)) {
       problems.push('дубль: такая компания уже есть');
       stats.duplicates++;

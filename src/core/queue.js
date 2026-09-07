@@ -8,6 +8,7 @@
 // своего хода — за ней остаётся долг: следующую компанию она получит вне очереди.
 // Пример: назначили на 3, прилетел отказ от 1 → 1,2,3,[1],4,1,2,3,4
 import { enqueueWebhook } from './webhooks.js';
+import { getConfig } from './columns.js';
 
 export const KINDS = ['lead', 'meeting'];
 
@@ -92,16 +93,18 @@ export function assignNext(db, leadId) {
   logEvent(db, { leadId, teamId: pick.team.id, kind: 'assigned', data: { via_priority: !!pick.viaPriority } });
 
   // в таблицу — пометка «назначено», в СРМ — вебхук
-  queueSheetWrite(db, lead, process.env.SHEET_STATUS_ASSIGNED || 'назначено');
+  queueSheetWrite(db, lead);
   enqueueWebhook(db, 'lead.assigned', leadId, pick.team.id);
 
   return db.prepare('SELECT * FROM assignments WHERE id = ?').get(Number(info.lastInsertRowid));
 }
 
-export function queueSheetWrite(db, lead, value) {
-  if (!process.env.SHEETS_STATUS_COLUMN) return null;
+// Пометка «назначено» напротив компании. Значение и колонка — из схемы таблицы.
+export function queueSheetWrite(db, lead) {
+  if (!process.env.SHEETS_SPREADSHEET_ID) return null;   // таблица не подключена
+  const cfg = getConfig();
   const info = db.prepare('INSERT INTO sheet_writes (lead_id, source_key, value) VALUES (?, ?, ?)')
-    .run(lead.id, lead.source_key, value);
+    .run(lead.id, lead.source_key, cfg.statuses.assigned);
   return Number(info.lastInsertRowid);
 }
 
@@ -157,7 +160,7 @@ export function assignManually(db, leadId, teamId) {
   db.prepare("UPDATE leads SET status = 'assigned', assigned_team = ?, updated_at = ? WHERE id = ?")
     .run(teamId, nowIso(), leadId);
   logEvent(db, { leadId, teamId, kind: 'assigned_manually' });
-  queueSheetWrite(db, lead, process.env.SHEET_STATUS_ASSIGNED || 'назначено');
+  queueSheetWrite(db, lead);
   enqueueWebhook(db, 'lead.assigned', leadId, teamId, { manual: true });
   return { ok: true };
 }

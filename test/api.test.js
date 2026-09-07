@@ -4,8 +4,10 @@ import { createServer } from 'node:http';
 import { openMigrated } from '../src/db/index.js';
 import { createHandler } from '../src/http/api.js';
 
-const HEADERS = ['Компания', 'Телефон', 'Лидогенератор', 'Тип лида', 'Статус'];
+// схема по умолчанию: B компания, C контакт, D телефон, E лидген, F тип, G статус
+const HEAD = ['Дата', 'Компания', 'Контакт', 'Телефон', 'Лидген', 'Тип лида', 'Статус'];
 const rows = (...list) => list.map((cells, i) => ({ key: `Лист1:${i + 2}`, cells }));
+const row = (company, phone, gen, type, status = '') => ['01.09', company, '', phone, gen, type, status];
 
 async function withServer(fn) {
   const db = openMigrated(':memory:');
@@ -30,11 +32,10 @@ test('health отвечает', () => withServer(async ({ call }) => {
 
 test('заливка строк и распределение по кругу команд', () => withServer(async ({ call }) => {
   const imported = await call('/api/import/rows', 'POST', {
-    headers: HEADERS,
     rows: rows(
-      ['ООО Ромашка', '901234567', 'Аня', 'Лид', ''],
-      ['Chinor Group', '901234568', 'Аня', 'Лид', ''],
-      ['Delta Trade', '901234569', 'Бек', 'Назначена встреча', ''],
+      row('ООО Ромашка', '901234567', 'Аня', 'Лид'),
+      row('Chinor Group', '901234568', 'Аня', 'Лид'),
+      row('Delta Trade', '901234569', 'Бек', 'Встреча'),
     ),
   });
   assert.equal(imported.body.created, 3);
@@ -50,13 +51,13 @@ test('заливка строк и распределение по кругу к
 
 test('фрод из СРМ закрывает компанию и даёт команде долг', () => withServer(async ({ call }) => {
   await call('/api/import/rows', 'POST', {
-    headers: HEADERS, rows: rows(['ООО Ромашка', '901234567', 'Аня', 'Лид', '']),
+    rows: rows(row('ООО Ромашка', '901234567', 'Аня', 'Лид')),
   });
   await call('/api/dispatch', 'POST');
 
   // СРМ переписала статус в таблице
   await call('/api/import/rows', 'POST', {
-    headers: HEADERS, rows: rows(['ООО Ромашка', '901234567', 'Аня', 'Лид', 'Отказ']),
+    rows: rows(row('ООО Ромашка', '901234567', 'Аня', 'Лид', 'Отказ')),
   });
 
   assert.equal((await call('/api/leads?status=assigned')).body.length, 0);
@@ -70,7 +71,7 @@ test('фрод из СРМ закрывает компанию и даёт ко�
 
 test('ручное назначение и отметка «в работе»', () => withServer(async ({ call }) => {
   await call('/api/import/rows', 'POST', {
-    headers: HEADERS, rows: rows(['ООО Ромашка', '901234567', 'Аня', 'Лид', '']),
+    rows: rows(row('ООО Ромашка', '901234567', 'Аня', 'Лид')),
   });
   const [lead] = (await call('/api/leads?status=new')).body;
   await call(`/api/leads/${lead.id}/assign`, 'POST', { team_id: 3 });
@@ -82,12 +83,19 @@ test('ручное назначение и отметка «в работе»', 
 
 test('карантин виден отдельно и возвращается в работу', () => withServer(async ({ call }) => {
   await call('/api/import/rows', 'POST', {
-    headers: HEADERS, rows: rows(['', '', 'Бек', '', '']),
+    rows: rows(row('', '', 'Бек', '')),
   });
   const [bad] = (await call('/api/leads?status=quarantine')).body;
   assert.match(bad.quarantine_reason, /нет/);
   await call(`/api/leads/${bad.id}/release`, 'POST');
   assert.equal((await call('/api/leads?status=new')).body.length, 1);
+}));
+
+test('схема колонок отдаётся наружу', () => withServer(async ({ call }) => {
+  const cfg = (await call('/api/columns')).body;
+  assert.equal(cfg.columns.company, 'B');
+  assert.equal(cfg.statusColumn, 'G');
+  assert.equal(cfg.leadTypes.meeting, 'встреча');
 }));
 
 test('команды: создание, порядок, отключение', () => withServer(async ({ call }) => {

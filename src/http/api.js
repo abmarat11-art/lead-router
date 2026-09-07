@@ -7,6 +7,7 @@ import {
   queuePreview, activeTeams, KINDS,
 } from '../core/queue.js';
 import { releaseFromQuarantine, importBatch } from '../core/importer.js';
+import { getConfig } from '../core/columns.js';
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
@@ -82,7 +83,15 @@ export function createHandler(db, { importNow } = {}) {
 
       if (req.method === 'POST' && p === '/api/import/rows') {
         const body = await readJson(req); // ручная заливка строк / тесты
-        return json(res, 200, importBatch(db, body));
+        return json(res, 200, importBatch(db, body, getConfig()));
+      }
+
+      if (req.method === 'GET' && p === '/api/columns') {
+        const cfg = getConfig();
+        return json(res, 200, {
+          sheet: cfg.sheet, firstDataRow: cfg.firstDataRow, columns: cfg.columns,
+          leadTypes: cfg.leadTypes, statuses: cfg.statuses, statusColumn: cfg.statusColumn,
+        });
       }
 
       if (req.method === 'POST' && seg[1] === 'leads' && seg[3]) {

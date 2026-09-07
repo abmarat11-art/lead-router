@@ -18,7 +18,13 @@ function setup() {
 beforeEach(() => {
   process.env.ARGUS_WEBHOOK_URL = 'https://argus.example/hook';
   process.env.ARGUS_WEBHOOK_SECRET = 'secret';
-  delete process.env.SHEETS_STATUS_COLUMN;
+  delete process.env.SHEETS_SPREADSHEET_ID;
+});
+
+test('без подключённой таблицы пометки не копятся', () => {
+  const db = setup();
+  assignNext(db, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM sheet_writes').get().c, 0);
 });
 
 test('без настроенного URL вебхуки не копятся', () => {
@@ -93,7 +99,7 @@ test('после исчерпания попыток задача помечае
 });
 
 test('назначение ставит пометку в таблицу напротив компании', async () => {
-  process.env.SHEETS_STATUS_COLUMN = 'H';
+  process.env.SHEETS_SPREADSHEET_ID = 'sheet-id';
   const db = setup();
   assignNext(db, 1);
   const pending = db.prepare('SELECT * FROM sheet_writes').get();
@@ -103,12 +109,12 @@ test('назначение ставит пометку в таблицу нап�
   const written = [];
   const res = await flushSheetWrites(db, { write: async (w) => { written.push(w); } });
   assert.deepEqual(res, { picked: 1, written: 1, failed: 0 });
-  assert.deepEqual(written[0], { sourceKey: 'Лист1:2', value: 'назначено' });
+  assert.deepEqual(written[0], { sourceKey: 'Лист1:2', value: 'назначено', column: 'G' });
   assert.equal(db.prepare('SELECT state s FROM sheet_writes').get().s, 'written');
 });
 
 test('сбой записи в таблицу не теряет пометку', async () => {
-  process.env.SHEETS_STATUS_COLUMN = 'H';
+  process.env.SHEETS_SPREADSHEET_ID = 'sheet-id';
   const db = setup();
   assignNext(db, 1);
   const res = await flushSheetWrites(db, { write: async () => { throw new Error('quota'); } });

@@ -7,15 +7,20 @@ import { importBatch } from './core/importer.js';
 import { dispatchQueue } from './core/queue.js';
 import { flushOutbox } from './core/webhooks.js';
 import { flushSheetWrites } from './core/sheetWriter.js';
+import { getConfig } from './core/columns.js';
 
 loadEnv();
 
 const db = openMigrated();
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
+const columns = getConfig();   // упадём на старте, если схема таблицы кривая
+log(`схема таблицы: лист "${columns.sheet}", статус в колонке ${columns.statusColumn}`);
+
 async function importNow() {
   const { fetchBatch } = await import('./adapters/sheets.js');
-  const stats = importBatch(db, await fetchBatch());
+  const cfg = getConfig();
+  const stats = importBatch(db, await fetchBatch(cfg), cfg);
   const dispatched = dispatchQueue(db);
   if (stats.created || stats.in_work || stats.declined || dispatched.assigned) {
     log('import', JSON.stringify(stats), 'dispatch', JSON.stringify(dispatched));
@@ -42,7 +47,7 @@ every(30_000, () => {
 every(10_000, async () => {
   const out = await flushOutbox(db);
   if (out.picked) log('outbox', JSON.stringify(out));
-  if (process.env.SHEETS_STATUS_COLUMN) {
+  if (process.env.SHEETS_SPREADSHEET_ID) {
     const sheet = await flushSheetWrites(db);
     if (sheet.picked) log('sheet', JSON.stringify(sheet));
   }
