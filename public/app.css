@@ -5,6 +5,8 @@
 
   /* полированное металлическое золото */
   --gold: linear-gradient(135deg, #A88145 0%, #F5DEA5 30%, #D4B26F 55%, #FFF6D1 75%, #A88145 100%);
+  /* та же гамма, но плотнее — для рамок толщиной в пиксель */
+  --gold-edge: linear-gradient(135deg, #8F6A33 0%, #E9CE8E 22%, #B8944F 48%, #FFF6D1 68%, #C9A45E 84%, #8F6A33 100%);
   --gloss: inset 0 1px 1px rgba(255,255,255,.4), 0 2px 4px rgba(0,0,0,.15);
 
   --line:#C6A46A;        /* сплошное золото там, где градиент неуместен */
@@ -27,8 +29,7 @@ nav button { background:none; border:1px solid transparent; color:var(--dim); pa
              border-radius:6px; cursor:pointer; font:inherit; }
 nav button:hover { color:var(--text); }
 nav button.on { color:var(--text); font-weight:600;
-                background:linear-gradient(var(--card),var(--card)) padding-box, var(--gold) border-box;
-                border-top-color:rgba(255,255,255,.6);
+                background:linear-gradient(var(--card),var(--card)) padding-box, var(--gold-edge) border-box;
                 box-shadow:var(--gloss); }
 .spacer { flex:1 }
 button.act { border:1px solid transparent; border-top-color:rgba(255,255,255,.6);
@@ -36,17 +37,17 @@ button.act { border:1px solid transparent; border-top-color:rgba(255,255,255,.6)
              border-radius:6px; cursor:pointer; font:inherit; font-weight:600;
              box-shadow:var(--gloss); text-shadow:0 1px 0 rgba(255,255,255,.35); }
 button.ghost { border:1px solid transparent; color:var(--text); padding:4px 10px;
-               background:linear-gradient(var(--card),var(--card)) padding-box, var(--gold) border-box;
+               background:linear-gradient(var(--card),var(--card)) padding-box, var(--gold-edge) border-box;
                border-radius:6px; cursor:pointer; font:inherit; box-shadow:var(--gloss); }
 button.ghost:hover, button.act:hover { filter:brightness(1.06) saturate(1.05); }
 button.ghost:active, button.act:active { box-shadow:inset 0 1px 3px rgba(0,0,0,.2); }
 main { padding:16px; }
 table { width:100%; border-collapse:separate; border-spacing:0; border:1px solid transparent;
-        background:linear-gradient(var(--card),var(--card)) padding-box, var(--gold) border-box;
+        background:linear-gradient(var(--card),var(--card)) padding-box, var(--gold-edge) border-box;
         border-radius:8px; overflow:hidden; box-shadow:0 2px 4px rgba(0,0,0,.08); }
 th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line-soft); vertical-align:top; }
 th { color:var(--text); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.04em;
-     background:var(--th); border-bottom:2px solid transparent; border-image:var(--gold) 1; }
+     background:var(--th); border-bottom:2px solid transparent; border-image:var(--gold-edge) 1; }
 tr:last-child td { border-bottom:0; }
 .tag { display:inline-block; padding:1px 7px; border-radius:20px; font-size:12px;
        background:var(--th); color:var(--dim); border:1px solid var(--line-soft); }
@@ -56,33 +57,32 @@ tr:last-child td { border-bottom:0; }
 .tag.escalated,.tag.quarantine,.tag.rejected { background:#fae7e9; color:var(--bad); border-color:#d99aa2 }
 .cards { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
 .card { border:1px solid transparent; border-radius:8px; padding:12px 16px; min-width:110px;
-        background:linear-gradient(var(--card),var(--card)) padding-box, var(--gold) border-box;
-        border-top-color:rgba(255,255,255,.6); box-shadow:var(--gloss); }
+        background:linear-gradient(var(--card),var(--card)) padding-box, var(--gold-edge) border-box;
+        box-shadow:var(--gloss); }
 .card b { display:block; font-size:22px; color:var(--text); }
 .card span { color:var(--dim); font-size:12px; }
 .dim { color:var(--dim); font-size:12px; }
 .chain { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
 .chip { border:1px solid transparent; border-radius:20px; padding:3px 10px;
-        background:linear-gradient(var(--card),var(--card)) padding-box, var(--gold) border-box;
+        background:linear-gradient(var(--card),var(--card)) padding-box, var(--gold-edge) border-box;
         box-shadow:var(--gloss); }
 .chip.prio { background:var(--gold) border-box; color:var(--acc-ink); font-weight:600;
              border-top-color:rgba(255,255,255,.6); text-shadow:0 1px 0 rgba(255,255,255,.35); }
 select,input { border:1px solid transparent; color:var(--text); border-radius:6px;
-               background:linear-gradient(#fff,#fff) padding-box, var(--gold) border-box;
+               background:linear-gradient(#fff,#fff) padding-box, var(--gold-edge) border-box;
                padding:4px 8px; font:inherit; box-shadow:inset 0 1px 1px rgba(0,0,0,.05); }
 input[type=checkbox] { accent-color:var(--acc); }
 button:disabled { opacity:.45; cursor:not-allowed; box-shadow:none; }
 #toast { position:fixed; right:16px; bottom:16px; display:flex; flex-direction:column; gap:8px; z-index:9; }
 #toast div { border:1px solid transparent; border-radius:8px; padding:10px 14px 10px 18px; max-width:420px;
-             background:linear-gradient(var(--card),var(--card)) padding-box, var(--gold) border-box;
+             background:linear-gradient(var(--card),var(--card)) padding-box, var(--gold-edge) border-box;
              box-shadow:inset 4px 0 0 var(--acc), 0 2px 10px rgba(94,74,34,.18); }
 #toast div.bad { box-shadow:inset 4px 0 0 var(--bad), 0 2px 10px rgba(94,74,34,.18); }
 #toast div.ok  { box-shadow:inset 4px 0 0 var(--ok),  0 2px 10px rgba(94,74,34,.18); }
 #modal { position:fixed; inset:0; background:rgba(30,50,48,.35); display:none; place-items:center; z-index:10; }
 #modal.on { display:grid; }
 #modal .box { border:1px solid transparent; border-radius:10px; padding:20px;
-              background:linear-gradient(var(--card),var(--card)) padding-box, var(--gold) border-box;
-              border-top-color:rgba(255,255,255,.6);
+              background:linear-gradient(var(--card),var(--card)) padding-box, var(--gold-edge) border-box;
               width:min(720px,92vw); max-height:86vh; overflow:auto;
               box-shadow:inset 0 1px 1px rgba(255,255,255,.4), 0 8px 30px rgba(94,74,34,.28); }
 #modal h2 { margin:0 0 4px; font-size:16px; }
@@ -93,3 +93,6 @@ button:disabled { opacity:.45; cursor:not-allowed; box-shadow:none; }
               font-size:12px; border:1px solid transparent; border-top-color:rgba(255,255,255,.6);
               box-shadow:var(--gloss); text-shadow:0 1px 0 rgba(255,255,255,.35); }
 .stale { color:var(--bad); font-weight:600; }
+
+:focus-visible { outline:2px solid #C9A45E; outline-offset:1px; }
+select:focus, input:focus { outline:2px solid #C9A45E; outline-offset:0; }

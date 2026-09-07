@@ -7,17 +7,17 @@
 <style>
   :root {
     --gold: linear-gradient(135deg, #A88145 0%, #F5DEA5 30%, #D4B26F 55%, #FFF6D1 75%, #A88145 100%);
+    --gold-edge: linear-gradient(135deg, #8F6A33 0%, #E9CE8E 22%, #B8944F 48%, #FFF6D1 68%, #C9A45E 84%, #8F6A33 100%);
     --gloss: inset 0 1px 1px rgba(255,255,255,.4), 0 2px 4px rgba(0,0,0,.15);
   }
   body { margin:0; height:100vh; display:grid; place-items:center; background:#e3f5f3; color:#5E4A22;
          font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif; }
   form { border:1px solid transparent; border-radius:10px; padding:24px; width:280px;
-         background:linear-gradient(#f4fbfa,#f4fbfa) padding-box, var(--gold) border-box;
-         border-top-color:rgba(255,255,255,.6);
+         background:linear-gradient(#f4fbfa,#f4fbfa) padding-box, var(--gold-edge) border-box;
          box-shadow:inset 0 1px 1px rgba(255,255,255,.4), 0 2px 12px rgba(94,74,34,.2); }
   h1 { font-size:16px; margin:0 0 16px; letter-spacing:.02em; }
   input { width:100%; margin-bottom:10px; border:1px solid transparent; color:inherit;
-          background:linear-gradient(#fff,#fff) padding-box, var(--gold) border-box;
+          background:linear-gradient(#fff,#fff) padding-box, var(--gold-edge) border-box;
           border-radius:6px; padding:8px 10px; font:inherit; box-shadow:inset 0 1px 1px rgba(0,0,0,.05); }
   input::placeholder { color:#8E7845; }
   button { width:100%; background:var(--gold) border-box; border:1px solid transparent;
@@ -26,6 +26,7 @@
            box-shadow:var(--gloss); text-shadow:0 1px 0 rgba(255,255,255,.35); }
   button:hover { filter:brightness(1.06) saturate(1.05); }
   button:active { box-shadow:inset 0 1px 3px rgba(0,0,0,.2); }
+  input:focus { outline:2px solid #C9A45E; outline-offset:0; }
   .err { color:#a8323f; font-size:12px; min-height:16px; margin-top:8px; }
 </style>
 </head>
