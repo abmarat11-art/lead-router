@@ -163,14 +163,11 @@ test('адаптер Б24 собирает поля компании и конт
         UF_CRM_1754990395249: '14120 - Производство спецодежды',
       } }) };
     }
-    if (method === 'crm.company.contact.items.get') {
-      return { ...body, json: async () => ({ result: [{ CONTACT_ID: 77 }] }) };
-    }
-    return { ...body, json: async () => ({ result: {
+    return { ...body, json: async () => ({ result: [{
       ID: 77, NAME: 'Иван', LAST_NAME: 'Иванов', SECOND_NAME: 'Петрович',
       PHONE: [{ VALUE: '+998901234567' }, { VALUE: '+998901112233' }],
       EMAIL: [{ VALUE: 'i@r.uz' }],
-    } }) };
+    }] }) };
   };
 
   process.env.B24_WEBHOOK_URL = 'https://portal.bitrix24.ru/rest/1/token/';
@@ -181,5 +178,6 @@ test('адаптер Б24 собирает поля компании и конт
   assert.equal(company.contacts[0].full_name, 'Иванов Иван Петрович');
   assert.deepEqual(company.contacts[0].phones, ['+998901234567', '+998901112233']);
   assert.equal(company.contacts[0].email, 'i@r.uz');
-  assert.deepEqual(calls, ['crm.company.get', 'crm.company.contact.items.get', 'crm.contact.get']);
+  assert.deepEqual(calls, ['crm.company.get', 'crm.contact.list'],
+    'контакты забираются одним запросом, а не по одному');
 });

@@ -26,28 +26,33 @@ async function call(method, params = {}, { fetchImpl = fetch } = {}) {
 const firstValue = (multi) => (Array.isArray(multi) && multi.length ? multi[0].VALUE : null);
 const allValues = (multi) => (Array.isArray(multi) ? multi.map((x) => x.VALUE).filter(Boolean) : []);
 
+// У компании бывает под сотню контактов; в Аргус всё равно уезжает первый,
+// остальные идут телефонами и почтами. Больше и не тянем.
+const MAX_CONTACTS = 20;
+
 /** Карточка компании + её контакты в том виде, в каком уйдут в Аргус. */
 export async function fetchCompany(companyId, opts = {}) {
   const company = await call('crm.company.get', { id: companyId }, opts);
   if (!company) throw new Error(`компания ${companyId} не найдена в Б24`);
 
-  const links = await call('crm.company.contact.items.get', { id: companyId }, opts).catch(() => []);
-  const contacts = [];
-  for (const link of links || []) {
-    const c = await call('crm.contact.get', { id: link.CONTACT_ID }, opts).catch(() => null);
-    if (!c) continue;
-    contacts.push({
-      b24_id: String(c.ID),
-      name: c.NAME || null,
-      last_name: c.LAST_NAME || null,
-      second_name: c.SECOND_NAME || null,
-      full_name: [c.LAST_NAME, c.NAME, c.SECOND_NAME].filter(Boolean).join(' ') || null,
-      phone: firstValue(c.PHONE),
-      phones: allValues(c.PHONE),
-      email: firstValue(c.EMAIL),
-      emails: allValues(c.EMAIL),
-    });
-  }
+  // одним запросом вместо запроса на каждый контакт: у крупных компаний их сотня
+  const rows = await call('crm.contact.list', {
+    filter: { COMPANY_ID: companyId },
+    select: ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'PHONE', 'EMAIL'],
+    start: 0,
+  }, opts).catch(() => []);
+
+  const contacts = (rows || []).slice(0, MAX_CONTACTS).map((c) => ({
+    b24_id: String(c.ID),
+    name: c.NAME || null,
+    last_name: c.LAST_NAME || null,
+    second_name: c.SECOND_NAME || null,
+    full_name: [c.LAST_NAME, c.NAME, c.SECOND_NAME].filter(Boolean).join(' ') || null,
+    phone: firstValue(c.PHONE),
+    phones: allValues(c.PHONE),
+    email: firstValue(c.EMAIL),
+    emails: allValues(c.EMAIL),
+  }));
 
   return {
     b24_id: String(company.ID),
