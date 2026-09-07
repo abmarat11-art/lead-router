@@ -8,7 +8,7 @@ export const COLUMN_SYNONYMS = {
   phone:        ['телефон', 'номер', 'phone', 'тел'],
   email:        ['почта', 'email', 'e-mail'],
   lead_gen:     ['лидогенератор', 'лидген', 'ответственный', 'кто нашёл', 'кто нашел', 'менеджер'],
-  outcome_type: ['итог', 'результат', 'тип', 'итог работы', 'outcome'],
+  lead_type:    ['тип лида', 'тип', 'вид лида', 'вид', 'lead type', 'type'],
   status:       ['статус', 'status', 'состояние'],
   region:       ['регион', 'город', 'область', 'region'],
   comment:      ['комментарий', 'примечание', 'заметка', 'comment'],
@@ -39,7 +39,7 @@ export function normalizePhone(raw) {
   return `+${digits}`;
 }
 
-// Итог работы лидгена задаёт очередь: лиды и встречи распределяются независимо.
+// Колонка «тип лида» задаёт очередь: лиды и встречи распределяются независимо.
 export function normalizeKind(raw) {
   const v = norm(raw);
   if (!v) return null;
@@ -74,7 +74,7 @@ export function normalizeRow(cells, headerMap, headers) {
     phone: normalizePhone(at('phone')),
     email: (at('email') || '').trim().toLowerCase() || null,
     lead_gen: (at('lead_gen') || '').trim() || null,
-    kind: normalizeKind(at('outcome_type')),
+    kind: normalizeKind(at('lead_type')),
     source_status: (at('status') || '').trim() || null,
     region: (at('region') || '').trim() || null,
     raw,
@@ -86,7 +86,7 @@ export function normalizeRow(cells, headerMap, headers) {
   const problems = [];
   if (!lead.company && !lead.contact_name) problems.push('нет ни компании, ни контакта');
   if (!lead.phone && !lead.email) problems.push('нет телефона и почты');
-  if (!lead.kind) problems.push('не указан итог работы (лид или встреча)');
+  if (!lead.kind) problems.push('не указан тип лида (лид или встреча)');
 
   return { lead, problems };
 }

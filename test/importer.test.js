@@ -5,7 +5,7 @@ import { importBatch, releaseFromQuarantine } from '../src/core/importer.js';
 import { toBatch } from '../src/adapters/sheets.js';
 import { normalizePhone, normalizeKind, normalizeStatus, mapHeaders } from '../src/core/normalize.js';
 
-const HEADERS = ['Дата', 'Компания', 'Контактное лицо', 'Телефон', 'Лидогенератор', 'Итог работы', 'Статус'];
+const HEADERS = ['Дата', 'Компания', 'Контактное лицо', 'Телефон', 'Лидогенератор', 'Тип лида', 'Статус'];
 const row = (over = {}) => {
   const base = ['01.09.2026', 'ООО Ромашка', 'Иван', '+998 90 123 45 67', 'Аня', 'Лид', ''];
   Object.entries(over).forEach(([i, v]) => { base[i] = v; });
@@ -23,7 +23,7 @@ test('заголовки маппятся по синонимам', () => {
   const map = mapHeaders(HEADERS);
   assert.equal(map.company, 1);
   assert.equal(map.phone, 3);
-  assert.equal(map.outcome_type, 5);
+  assert.equal(map.lead_type, 5);
   assert.equal(map.status, 6);
 });
 
@@ -100,7 +100,7 @@ test('правка данных лидгеном обновляет компан
   assert.ok(db.prepare("SELECT 1 FROM events WHERE kind = 'source_row_changed'").get());
 });
 
-test('строка без контактов и без итога уходит в карантин', () => {
+test('строка без контактов и без типа уходит в карантин', () => {
   const db = setup();
   const stats = importBatch(db, toBatch([HEADERS, row({ 1: '', 2: '', 3: '', 5: '' })], 'Лист1'));
   assert.equal(stats.quarantined, 1);

@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { openMigrated } from '../src/db/index.js';
 import { createHandler } from '../src/http/api.js';
 
-const HEADERS = ['Компания', 'Телефон', 'Лидогенератор', 'Итог работы', 'Статус'];
+const HEADERS = ['Компания', 'Телефон', 'Лидогенератор', 'Тип лида', 'Статус'];
 const rows = (...list) => list.map((cells, i) => ({ key: `Лист1:${i + 2}`, cells }));
 
 async function withServer(fn) {
