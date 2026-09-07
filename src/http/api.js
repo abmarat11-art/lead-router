@@ -186,7 +186,11 @@ export function createHandler(db, { importNow } = {}) {
         const file = p === '/' ? 'index.html' : p.slice(1);
         try {
           const body = await readFile(join(PUBLIC_DIR, file));
-          res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream' });
+          // правки видны сразу: ни браузер, ни Cloudflare не держат старую версию
+          res.writeHead(200, {
+            'content-type': MIME[extname(file)] || 'application/octet-stream',
+            'cache-control': 'no-store, must-revalidate',
+          });
           return res.end(body);
         } catch { /* провалимся в 404 */ }
       }
