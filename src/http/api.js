@@ -1,5 +1,6 @@
 // HTTP API поверх node:http — без фреймворка, роутов немного.
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join, dirname, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -197,5 +198,14 @@ export function stats(db) {
     db.prepare("SELECT argus_state, COUNT(*) c FROM leads WHERE argus_state != 'idle' GROUP BY argus_state")
       .all().map((r) => [r.argus_state, r.c])
   );
-  return { leads: byStatus, kinds: byKind, teams: byTeam, outbox, sheet_writes: sheet, argus };
+  // что вообще подключено — интерфейс по этому гасит недоступные кнопки
+  const config = {
+    // таблица считается подключённой только если есть и id, и ключ на диске
+    sheets: !!process.env.SHEETS_SPREADSHEET_ID
+      && !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON
+      && existsSync(process.env.GOOGLE_SERVICE_ACCOUNT_JSON),
+    argus: !!process.env.ARGUS_API_URL,
+    b24: !!process.env.B24_WEBHOOK_URL,
+  };
+  return { leads: byStatus, kinds: byKind, teams: byTeam, outbox, sheet_writes: sheet, argus, config };
 }

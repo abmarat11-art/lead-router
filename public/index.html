@@ -56,6 +56,12 @@
   select,input { background:#fff; border:1px solid var(--line); color:var(--text); border-radius:6px;
                  padding:4px 8px; font:inherit; }
   input[type=checkbox] { accent-color:var(--acc); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  #toast { position:fixed; right:16px; bottom:16px; display:flex; flex-direction:column; gap:8px; z-index:9; }
+  #toast div { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--acc);
+               border-radius:8px; padding:10px 14px; max-width:420px; box-shadow:0 2px 10px rgba(107,83,18,.15); }
+  #toast div.bad { border-left-color:var(--bad); }
+  #toast div.ok  { border-left-color:var(--ok); }
 </style>
 </head>
 <body>
@@ -63,11 +69,15 @@
   <h1>Контур лидов</h1>
   <nav id="nav"></nav>
   <div class="spacer"></div>
-  <button class="ghost" onclick="api('/api/import','POST').then(load)">Опросить таблицу</button>
-  <button class="act" onclick="api('/api/dispatch','POST').then(load)">Распределить пул</button>
-  <button class="ghost" onclick="api('/api/deliver','POST').then(load)">Отправить в Аргус</button>
+  <button class="ghost" id="btn-import" onclick="run(this,'/api/import','Читаю таблицу')"
+          title="Прочитать гуглтаблицу прямо сейчас, не дожидаясь ежеминутного опроса">Прочитать таблицу</button>
+  <button class="act" id="btn-dispatch" onclick="run(this,'/api/dispatch','Раздаю пул')"
+          title="Раздать командам всё, что лежит в пуле нераспределённым">Раздать по очереди</button>
+  <button class="ghost" id="btn-deliver" onclick="run(this,'/api/deliver','Отправляю в Аргус')"
+          title="Завести в Аргусе компании по уже назначенным строкам">Отправить в Аргус</button>
   <button class="ghost" onclick="fetch('/api/logout').then(()=>location.href='/login.html')">Выйти</button>
 </header>
+<div id="toast"></div>
 <main id="view">загрузка…</main>
 <script>
 const TABS = [['new','Пул'],['assigned','Назначены'],['in_work','В работе'],['rejected','Фрод'],['quarantine','Карантин'],['escalated','Эскалация'],['queues','Очереди'],['teams','Команды']];
@@ -79,6 +89,55 @@ const api = (url, method = 'GET', body) =>
     .then(r => { if (r.status === 401) location.href = '/login.html'; return r.json(); });
 
 const esc = (s) => String(s ?? '').replace(/[<>&]/g, c => ({ '<':'&lt;','>':'&gt;','&':'&amp;' }[c]));
+
+function toast(text, kind = '') {
+  const el = document.createElement('div');
+  el.className = kind;
+  el.textContent = text;
+  document.getElementById('toast').append(el);
+  setTimeout(() => el.remove(), kind === 'bad' ? 9000 : 4000);
+}
+
+// Любое действие кнопки: блокируем на время запроса и показываем, чем кончилось.
+async function run(button, url, busyText) {
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = busyText + '…';
+  try {
+    const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' } });
+    if (res.status === 401) return location.href = '/login.html';
+    const data = await res.json().catch(() => ({}));
+    if (data.error) toast(data.error, 'bad');
+    else toast(describe(url, data), 'ok');
+    await load();
+  } catch (err) {
+    toast('не получилось: ' + err.message, 'bad');
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+const plural = (n, one, few, many) => {
+  const d = n % 10, h = n % 100;
+  return `${n} ${d === 1 && h !== 11 ? one : d >= 2 && d <= 4 && (h < 12 || h > 14) ? few : many}`;
+};
+
+function describe(url, d) {
+  if (url.endsWith('/import')) {
+    if (!d.seen) return 'В таблице новых строк нет';
+    return `Прочитано ${plural(d.seen, 'строка', 'строки', 'строк')}: новых ${d.created}, `
+      + `в карантин ${d.quarantined}, раздано ${d.assigned ?? 0}`;
+  }
+  if (url.endsWith('/dispatch')) {
+    return d.seen ? `Раздано ${plural(d.assigned, 'компания', 'компании', 'компаний')}` : 'Пул пуст, раздавать нечего';
+  }
+  if (url.endsWith('/deliver')) {
+    if (!d.picked) return 'Нечего отправлять: все назначенные уже в Аргусе';
+    return `В Аргус ушло ${d.sent}, не получилось ${d.failed}`;
+  }
+  return 'Готово';
+}
 const teamName = (id) => teams.find(t => t.id === id)?.name || id;
 
 async function load() {
@@ -88,10 +147,22 @@ async function load() {
 }
 
 function render() {
+  // кнопка без настроенного доступа только злит: гасим и объясняем
+  const cfg = st.config || {};
+  toggle('btn-import', cfg.sheets, 'Таблица не подключена: нет ключа сервис-аккаунта Google');
+  toggle('btn-deliver', cfg.argus, 'Аргус не подключён: не задан ARGUS_API_URL');
+
   document.getElementById('nav').innerHTML = TABS.map(([k, t]) =>
     `<button class="${k === tab ? 'on' : ''}" onclick="tab='${k}';load()">${t}</button>`).join('');
   document.getElementById('view').innerHTML =
     tab === 'teams' ? renderTeams() : tab === 'queues' ? renderQueues() : renderLeads();
+}
+
+function toggle(id, enabled, why) {
+  const b = document.getElementById(id);
+  if (!b) return;
+  b.disabled = !enabled;
+  if (!enabled) b.title = why;
 }
 
 const counters = () => `<div class="cards">${
