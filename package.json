@@ -11,7 +11,8 @@
     "start": "node src/server.js",
     "migrate": "node src/db/migrate.js",
     "test": "node --test \"test/*.test.js\"",
-    "seed": "node src/db/seed.js"
+    "seed": "node src/db/seed.js",
+    "check-sheet": "node scripts/check-sheet.js"
   },
   "dependencies": {
     "google-auth-library": "^9.15.1"

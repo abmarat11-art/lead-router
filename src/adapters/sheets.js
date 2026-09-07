@@ -11,7 +11,13 @@ function client() {
   if (cachedClient) return cachedClient;
   const path = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!path) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON не задан');
-  const key = JSON.parse(readFileSync(path, 'utf8'));
+  let raw;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    throw new Error(`ключ сервис-аккаунта не найден: ${path} — положите json из Google Cloud`);
+  }
+  const key = JSON.parse(raw);
   cachedClient = new JWT({ email: key.client_email, key: key.private_key, scopes: SCOPES });
   return cachedClient;
 }
