@@ -62,6 +62,16 @@
                border-radius:8px; padding:10px 14px; max-width:420px; box-shadow:0 2px 10px rgba(107,83,18,.15); }
   #toast div.bad { border-left-color:var(--bad); }
   #toast div.ok  { border-left-color:var(--ok); }
+  #modal { position:fixed; inset:0; background:rgba(30,50,48,.35); display:none; place-items:center; z-index:10; }
+  #modal.on { display:grid; }
+  #modal .box { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:20px;
+                width:min(720px,92vw); max-height:86vh; overflow:auto; box-shadow:0 8px 30px rgba(107,83,18,.25); }
+  #modal h2 { margin:0 0 4px; font-size:16px; }
+  #modal .close { float:right; }
+  .subtabs { display:flex; gap:8px; margin:12px 0; }
+  .row-actions { display:flex; gap:6px; align-items:center; }
+  .badge-main { background:var(--acc); color:var(--acc-ink); border-radius:20px; padding:1px 8px; font-size:12px; }
+  .stale { color:var(--bad); font-weight:600; }
 </style>
 </head>
 <body>
@@ -78,6 +88,7 @@
   <button class="ghost" onclick="fetch('/api/logout').then(()=>location.href='/login.html')">Выйти</button>
 </header>
 <div id="toast"></div>
+<div id="modal" onclick="if(event.target.id==='modal') closeTeam()"><div class="box" id="modal-box"></div></div>
 <main id="view">загрузка…</main>
 <script>
 const TABS = [['new','Пул'],['assigned','Назначены'],['in_work','В работе'],['rejected','Фрод'],['quarantine','Карантин'],['escalated','Эскалация'],['queues','Очереди'],['teams','Команды']];
@@ -140,6 +151,20 @@ function describe(url, d) {
 }
 const teamName = (id) => teams.find(t => t.id === id)?.name || id;
 
+// время в базе — UTC без зоны; показываем по-местному
+const when = (iso) => {
+  if (!iso) return '<span class="dim">—</span>';
+  const d = new Date(iso.replace(' ', 'T') + 'Z');
+  return `${d.toLocaleDateString('ru-RU')}<div class="dim">${d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</div>`;
+};
+
+const age = (hours) => {
+  if (hours === null || hours === undefined) return '';
+  if (hours < 1) return 'только что';
+  if (hours < 24) return `висит ${Math.round(hours)} ч`;
+  return `висит ${Math.floor(hours / 24)} дн`;
+};
+
 async function load() {
   [st, teams, queues] = await Promise.all([api('/api/stats'), api('/api/teams'), api('/api/queues')]);
   data = ['teams', 'queues'].includes(tab) ? [] : await api('/api/leads?status=' + tab);
@@ -173,7 +198,8 @@ function renderLeads() {
   if (!data.length) return counters() + '<p class="dim">Пусто.</p>';
   const opts = teams.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
   return counters() + `<table><tr>
-      <th>Компания</th><th>Контакт</th><th>Вид</th><th>Лидген</th><th>Статус</th><th>Команда</th><th></th></tr>` +
+      <th>Компания</th><th>Контакт</th><th>Вид</th><th>Лидген</th><th>Статус</th>
+      <th>Назначено</th><th>Статус изменён</th><th>Команда</th><th></th></tr>` +
     data.map(l => `<tr>
       <td>${esc(l.company)}<div class="dim">${esc(l.source_key)}</div></td>
       <td>${esc(l.contact_name)}<div class="dim">${esc(l.phone || l.email)}</div></td>
@@ -182,6 +208,8 @@ function renderLeads() {
       <td><span class="tag ${l.status}">${l.status}</span>
         ${l.quarantine_reason ? `<div class="dim">${esc(l.quarantine_reason)}</div>` : ''}
         ${l.decline_count ? `<div class="dim">отказов: ${l.decline_count}</div>` : ''}</td>
+      <td>${when(l.assigned_at)}</td>
+      <td>${when(l.status_changed_at)}<div class="${l.age_hours > 24 ? 'stale' : 'dim'}">${age(l.age_hours)}</div></td>
       <td>${esc(l.team_name || '—')}
         ${l.assignments.length > 1 ? `<div class="dim">${l.assignments.map(a => esc(a.team_name) + ' — ' + a.state).join(', ')}</div>` : ''}</td>
       <td>
@@ -206,15 +234,22 @@ function renderQueues() {
 }
 
 function renderTeams() {
-  return `<table><tr><th>Порядок</th><th>Команда</th><th>Ответственный в Аргусе</th><th>Назначено сейчас</th><th>Взяли в работу</th><th>Фрод</th><th>Активна</th></tr>` +
-    (st.teams || []).map(t => `<tr>
-      <td>${t.queue_order}</td><td>${esc(t.name)}</td>
-      <td><input value="${esc(t.argus_user_id || '')}" placeholder="id из Аргуса" style="width:200px"
-            onchange="api('/api/teams/${t.id}','PATCH',{argus_user_id:this.value||null}).then(load)">
-        ${t.argus_user_id ? '' : '<div class="dim">без него компания не уедет</div>'}</td>
+  const byId = Object.fromEntries(teams.map(t => [t.id, t]));
+  return `<table><tr><th>Порядок</th><th>Команда</th><th>Состав</th><th>Назначено сейчас</th><th>Взяли в работу</th><th>Фрод</th><th>Активна</th></tr>` +
+    (st.teams || []).map(t => {
+      const members = byId[t.id]?.members || [];
+      const main = members.find(m => m.role === 'assignee' && m.active);
+      return `<tr>
+      <td>${t.queue_order}</td>
+      <td><button class="ghost" onclick="openTeam(${t.id})">${esc(t.name)}</button></td>
+      <td>${main
+          ? `<span class="badge-main">${esc(main.name || main.argus_user_id)}</span>`
+          : '<span class="dim">получатель не выбран — компании не уедут</span>'}
+        <div class="dim">всего в команде: ${members.length}</div></td>
       <td>${t.pending || 0}</td><td>${t.in_work || 0}</td><td>${t.declined || 0}</td>
       <td><input type="checkbox" ${t.active ? 'checked' : ''} onchange="api('/api/teams/${t.id}','PATCH',{active:this.checked?1:0}).then(load)"></td>
-    </tr>`).join('') + `</table>
+    </tr>`;
+    }).join('') + `</table>
     <h3>Вебхуки в Аргус</h3><div class="cards">${
       Object.entries(st.outbox || {}).map(([k, v]) => `<div class="card"><b>${v}</b><span>${k}</span></div>`).join('') || '<span class="dim">очередь пуста</span>'
     }</div>
@@ -224,6 +259,98 @@ function renderTeams() {
     <h3>Компании в Аргусе</h3><div class="cards">${
       Object.entries(st.argus || {}).map(([k, v]) => `<div class="card"><b>${v}</b><span>${k}</span></div>`).join('') || '<span class="dim">пока не отправляли</span>'
     }</div>`;
+}
+
+// ---- карточка команды: состав и история ----
+let openTeamId = null, teamTab = 'members';
+
+async function openTeam(id) {
+  openTeamId = id;
+  teamTab = 'members';
+  await renderTeam();
+  document.getElementById('modal').classList.add('on');
+}
+
+function closeTeam() {
+  document.getElementById('modal').classList.remove('on');
+  openTeamId = null;
+  load();
+}
+
+async function renderTeam() {
+  const team = teams.find(t => t.id === openTeamId) || {};
+  const [members, history] = await Promise.all([
+    api(`/api/teams/${openTeamId}/members`),
+    api(`/api/teams/${openTeamId}/history`),
+  ]);
+
+  const body = teamTab === 'members' ? membersTable(members) : historyTable(history);
+  document.getElementById('modal-box').innerHTML = `
+    <button class="ghost close" onclick="closeTeam()">Закрыть</button>
+    <h2>${esc(team.name || 'Команда')}</h2>
+    <div class="dim">место в очереди: ${team.queue_order ?? '—'}</div>
+    <div class="subtabs">
+      <button class="${teamTab === 'members' ? 'act' : 'ghost'}" onclick="teamTab='members';renderTeam()">Состав</button>
+      <button class="${teamTab === 'history' ? 'act' : 'ghost'}" onclick="teamTab='history';renderTeam()">История изменений</button>
+    </div>
+    ${body}`;
+}
+
+function membersTable(members) {
+  return `<table><tr><th>Имя</th><th>ID в Аргусе</th><th>Назначать сюда</th><th>Активен</th><th></th></tr>` +
+    members.map(m => `<tr>
+      <td><input value="${esc(m.name || '')}" placeholder="имя"
+            onchange="patchMember(${m.id},{name:this.value||null})" style="width:150px"></td>
+      <td><input value="${esc(m.argus_user_id)}"
+            onchange="patchMember(${m.id},{argus_user_id:this.value})" style="width:220px"></td>
+      <td><input type="radio" name="assignee" ${m.role === 'assignee' ? 'checked' : ''}
+            onchange="patchMember(${m.id},{role:'assignee'})"
+            title="компания заводится в Аргусе на этого человека"></td>
+      <td><input type="checkbox" ${m.active ? 'checked' : ''}
+            onchange="patchMember(${m.id},{active:this.checked?1:0})"></td>
+      <td><button class="ghost" onclick="dropMember(${m.id})">Убрать</button></td>
+    </tr>`).join('') +
+    `</table>
+     <h3>Добавить человека</h3>
+     <div class="row-actions">
+       <input id="m-name" placeholder="имя">
+       <input id="m-id" placeholder="id пользователя в Аргусе" style="width:260px">
+       <button class="act" onclick="createMember()">Добавить</button>
+     </div>
+     <p class="dim">Назначение уходит на отмеченного точкой. Остальные получают уведомления;
+        отметить «принять» или «фрод» может любой из них.</p>`;
+}
+
+const HISTORY_RU = {
+  member_added: 'добавлен участник', member_removed: 'участник убран',
+  member_changed: 'участник изменён', assignee_replaced: 'сменился получатель',
+  team_changed: 'команда изменена', team_created: 'команда создана',
+};
+
+function historyTable(history) {
+  if (!history.length) return '<p class="dim">Изменений пока не было.</p>';
+  return `<table><tr><th>Когда</th><th>Что</th><th>Подробности</th></tr>` +
+    history.map(h => `<tr>
+      <td>${when(h.created_at)}</td>
+      <td>${HISTORY_RU[h.kind] || esc(h.kind)}</td>
+      <td class="dim">${esc(JSON.stringify(JSON.parse(h.data)))}</td>
+    </tr>`).join('') + '</table>';
+}
+
+const patchMember = (id, patch) =>
+  api(`/api/teams/${openTeamId}/members/${id}`, 'PATCH', patch).then(renderTeam);
+
+const dropMember = (id) =>
+  fetch(`/api/teams/${openTeamId}/members/${id}`, { method: 'DELETE' }).then(renderTeam);
+
+async function createMember() {
+  const argus_user_id = document.getElementById('m-id').value.trim();
+  if (!argus_user_id) return toast('нужен id пользователя в Аргусе', 'bad');
+  const res = await api(`/api/teams/${openTeamId}/members`, 'POST', {
+    argus_user_id, name: document.getElementById('m-name').value.trim() || null,
+  });
+  if (res.error) return toast(res.error, 'bad');
+  renderTeam();
 }
 
 load();

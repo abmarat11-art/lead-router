@@ -9,6 +9,9 @@ import {
 } from '../core/queue.js';
 import { releaseFromQuarantine, importBatch } from '../core/importer.js';
 import { getConfig } from '../core/columns.js';
+import {
+  listMembers, teamHistory, addMember, updateMember, removeMember, logTeamChange,
+} from '../core/teams.js';
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
@@ -48,7 +51,29 @@ export function createHandler(db, { importNow } = {}) {
       }
 
       if (req.method === 'GET' && p === '/api/teams') {
-        return json(res, 200, db.prepare('SELECT * FROM teams ORDER BY queue_order, id').all());
+        const teams = db.prepare('SELECT * FROM teams ORDER BY queue_order, id').all();
+        return json(res, 200, teams.map((t) => ({ ...t, members: listMembers(db, t.id) })));
+      }
+
+      // ---- состав команды и её журнал ----
+      if (seg[1] === 'teams' && seg[3] === 'members') {
+        const teamId = Number(seg[2]);
+        if (req.method === 'GET') return json(res, 200, listMembers(db, teamId));
+        if (req.method === 'POST') {
+          const b = await readJson(req);
+          return json(res, 200, { id: addMember(db, teamId, b) });
+        }
+        if (req.method === 'PATCH' && seg[4]) {
+          const b = await readJson(req);
+          return json(res, 200, updateMember(db, teamId, Number(seg[4]), b));
+        }
+        if (req.method === 'DELETE' && seg[4]) {
+          return json(res, 200, removeMember(db, teamId, Number(seg[4])));
+        }
+      }
+
+      if (req.method === 'GET' && seg[1] === 'teams' && seg[3] === 'history') {
+        return json(res, 200, teamHistory(db, Number(seg[2])));
       }
 
       if (req.method === 'GET' && p === '/api/queues') {
@@ -129,7 +154,9 @@ export function createHandler(db, { importNow } = {}) {
         const order = b.queue_order ?? (activeTeams(db).length + 1);
         const info = db.prepare('INSERT INTO teams (name, queue_order, argus_user_id) VALUES (?, ?, ?)')
           .run(b.name, order, b.argus_user_id ?? null);
-        return json(res, 200, { id: Number(info.lastInsertRowid) });
+        const id = Number(info.lastInsertRowid);
+        logTeamChange(db, id, 'team_created', { name: b.name, queue_order: order });
+        return json(res, 200, { id });
       }
 
       if (req.method === 'PATCH' && seg[1] === 'teams' && seg[2]) {
@@ -141,7 +168,16 @@ export function createHandler(db, { importNow } = {}) {
           fields.push(`${k} = ?`);
           values.push(v);
         }
-        if (fields.length) db.prepare(`UPDATE teams SET ${fields.join(', ')} WHERE id = ?`).run(...values, Number(seg[2]));
+        const teamId = Number(seg[2]);
+        if (fields.length) {
+          const before = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
+          db.prepare(`UPDATE teams SET ${fields.join(', ')} WHERE id = ?`).run(...values, teamId);
+          const after = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
+          logTeamChange(db, teamId, 'team_changed', {
+            was: { name: before.name, queue_order: before.queue_order, active: before.active },
+            now: { name: after.name, queue_order: after.queue_order, active: after.active },
+          });
+        }
         return json(res, 200, { ok: true });
       }
 
@@ -165,6 +201,10 @@ export function createHandler(db, { importNow } = {}) {
 const decorate = (db) => (lead) => ({
   ...lead,
   raw: JSON.parse(lead.raw || '{}'),
+  // сколько часов компания висит в текущем состоянии — видно, что залежалось
+  age_hours: lead.status_changed_at
+    ? Math.max(0, Math.round((Date.now() - Date.parse(lead.status_changed_at + 'Z')) / 36e5 * 10) / 10)
+    : null,
   team_name: lead.assigned_team
     ? db.prepare('SELECT name FROM teams WHERE id = ?').get(lead.assigned_team)?.name ?? null
     : null,

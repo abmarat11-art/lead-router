@@ -91,7 +91,7 @@ test('компания уезжает в Аргус на ответственн�
   assert.equal(lead.argus_company_id, 'argus-900');
 });
 
-test('у команды не указан ответственный — строка не уезжает, ошибка видна', async () => {
+test('у команды не выбран получатель — строка не уезжает, ошибка видна', async () => {
   const db = setup();
   db.prepare('UPDATE teams SET argus_user_id = NULL WHERE id = 1').run();
   load(db, rowWithB24());
@@ -102,7 +102,7 @@ test('у команды не указан ответственный — стр�
   assert.equal(res.failed, 1);
   const lead = db.prepare('SELECT * FROM leads').get();
   assert.equal(lead.argus_state, 'pending');
-  assert.match(lead.argus_error, /не указан ответственный/);
+  assert.match(lead.argus_error, /не выбран получатель/);
 });
 
 test('Аргус недоступен — пять попыток, потом failed, назначение не теряется', async () => {

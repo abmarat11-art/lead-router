@@ -10,6 +10,30 @@ CREATE TABLE IF NOT EXISTS teams (
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Люди команды в Аргусе: один получает назначение, остальные — уведомления.
+CREATE TABLE IF NOT EXISTS team_members (
+  id            INTEGER PRIMARY KEY,
+  team_id       INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  argus_user_id TEXT NOT NULL,
+  name          TEXT,
+  -- assignee: на него заводится компания | notify: только уведомления
+  role          TEXT NOT NULL DEFAULT 'notify',
+  active        INTEGER NOT NULL DEFAULT 1,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_members_team ON team_members(team_id, active);
+
+-- Журнал правок по команде: кто когда сменил получателя, состав, порядок.
+CREATE TABLE IF NOT EXISTS team_history (
+  id         INTEGER PRIMARY KEY,
+  team_id    INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL,
+  data       TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_team_history ON team_history(team_id, id);
+
 -- Курсор круговой очереди. Своя строка на каждый вид: лиды и встречи не пересекаются.
 CREATE TABLE IF NOT EXISTS queue_state (
   kind    TEXT PRIMARY KEY,                 -- lead | meeting
@@ -57,6 +81,8 @@ CREATE TABLE IF NOT EXISTS leads (
   -- new | assigned | in_work | rejected (фрод) | escalated | quarantine
   status         TEXT NOT NULL DEFAULT 'new',
   assigned_team  INTEGER REFERENCES teams(id),
+  assigned_at    TEXT,                      -- когда очередь отдала компанию команде
+  status_changed_at TEXT,                   -- когда статус менялся в последний раз
   decline_count  INTEGER NOT NULL DEFAULT 0,   -- сколько раз строку отметили фродом
   quarantine_reason TEXT,
   imported_at    TEXT NOT NULL DEFAULT (datetime('now')),

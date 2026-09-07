@@ -70,12 +70,13 @@ export function importBatch(db, batch, config = loadConfig()) {
 
     const info = db.prepare(`INSERT INTO leads
       (source_key, source_hash, company, contact_name, phone, email, lead_gen, kind,
-       region, raw, dedup_key, source_status, b24_company_id, enrich_state, status, quarantine_reason)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+       region, raw, dedup_key, source_status, b24_company_id, enrich_state, status,
+       status_changed_at, quarantine_reason)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(row.key, hash, lead.company, lead.contact_name, lead.phone, lead.email,
            lead.lead_gen, lead.kind, lead.region, JSON.stringify(lead.raw),
            lead.dedup_key, lead.source_status, lead.b24_company_id,
-           needsEnrich ? 'pending' : 'ready', leadStatus,
+           needsEnrich ? 'pending' : 'ready', leadStatus, nowIso(),
            problems.length ? problems.join('; ') : null);
 
     const id = Number(info.lastInsertRowid);

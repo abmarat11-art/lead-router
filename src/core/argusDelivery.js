@@ -12,7 +12,12 @@ function logEvent(db, leadId, teamId, kind, data = {}) {
 /** Назначенные строки, которые ещё не уехали в СРМ. */
 export function pending(db, limit = 20) {
   return db.prepare(`
-    SELECT l.*, t.argus_user_id, t.name team_name
+    SELECT l.*, t.name team_name,
+      COALESCE(
+        (SELECT m.argus_user_id FROM team_members m
+          WHERE m.team_id = t.id AND m.role = 'assignee' AND m.active = 1 ORDER BY m.id LIMIT 1),
+        t.argus_user_id
+      ) AS argus_user_id
     FROM leads l JOIN teams t ON t.id = l.assigned_team
     WHERE l.argus_state = 'pending' AND l.argus_attempts < ?
     ORDER BY l.id LIMIT ?`).all(MAX_ATTEMPTS, limit);
@@ -33,7 +38,7 @@ export async function deliverPending(db, { limit = 20, ensure } = {}) {
     const attempts = lead.argus_attempts + 1;
     try {
       if (!lead.argus_user_id) {
-        throw new Error(`у команды «${lead.team_name}» не указан ответственный в Аргусе`);
+        throw new Error(`у команды «${lead.team_name}» не выбран получатель назначения`);
       }
       const company = lead.b24_snapshot ? JSON.parse(lead.b24_snapshot) : companyFromRow(lead);
 

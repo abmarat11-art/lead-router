@@ -106,8 +106,9 @@ export function assignNext(db, leadId) {
   commitPick(db, lead.kind, pick, leadId);
 
   const info = db.prepare('INSERT INTO assignments (lead_id, team_id) VALUES (?, ?)').run(leadId, pick.team.id);
-  db.prepare("UPDATE leads SET status = 'assigned', assigned_team = ?, updated_at = ? WHERE id = ?")
-    .run(pick.team.id, nowIso(), leadId);
+  db.prepare(`UPDATE leads SET status = 'assigned', assigned_team = ?, assigned_at = ?,
+                status_changed_at = ?, updated_at = ? WHERE id = ?`)
+    .run(pick.team.id, nowIso(), nowIso(), nowIso(), leadId);
   logEvent(db, { leadId, teamId: pick.team.id, kind: 'assigned', data: { via_priority: !!pick.viaPriority } });
 
   // в таблицу — пометка «назначено»; в Аргус компания уедет уже назначенной
@@ -133,7 +134,8 @@ export function markInWork(db, leadId) {
   if (a) {
     db.prepare("UPDATE assignments SET state = 'in_work', resolved_at = ? WHERE id = ?").run(nowIso(), a.id);
   }
-  db.prepare("UPDATE leads SET status = 'in_work', updated_at = ? WHERE id = ?").run(nowIso(), leadId);
+  db.prepare("UPDATE leads SET status = 'in_work', status_changed_at = ?, updated_at = ? WHERE id = ?")
+    .run(nowIso(), nowIso(), leadId);
   logEvent(db, { leadId, teamId: a?.team_id ?? null, kind: 'in_work' });
   enqueueWebhook(db, 'lead.in_work', leadId, a?.team_id ?? null);
   return { ok: true };
@@ -151,8 +153,9 @@ export function markDeclined(db, leadId, reason = null) {
     pushPriority(db, lead.kind, a.team_id, { leadId, reason: reason || 'фрод: отказ из СРМ' });
   }
 
-  db.prepare("UPDATE leads SET status = 'rejected', decline_count = decline_count + 1, updated_at = ? WHERE id = ?")
-    .run(nowIso(), leadId);
+  db.prepare(`UPDATE leads SET status = 'rejected', decline_count = decline_count + 1,
+                status_changed_at = ?, updated_at = ? WHERE id = ?`)
+    .run(nowIso(), nowIso(), leadId);
   logEvent(db, { leadId, teamId: a?.team_id ?? null, kind: 'declined', data: { reason } });
   enqueueWebhook(db, 'lead.declined', leadId, a?.team_id ?? null, { reason });
 
@@ -164,8 +167,9 @@ function openAssignment(db, leadId) {
 }
 
 export function escalate(db, leadId, reason) {
-  db.prepare("UPDATE leads SET status = 'escalated', assigned_team = NULL, updated_at = ? WHERE id = ?")
-    .run(nowIso(), leadId);
+  db.prepare(`UPDATE leads SET status = 'escalated', assigned_team = NULL,
+                status_changed_at = ?, updated_at = ? WHERE id = ?`)
+    .run(nowIso(), nowIso(), leadId);
   logEvent(db, { leadId, kind: 'escalated', data: { reason } });
   enqueueWebhook(db, 'lead.escalated', leadId, null, { reason });
 }
@@ -176,8 +180,9 @@ export function assignManually(db, leadId, teamId) {
   db.prepare("UPDATE assignments SET state = 'cancelled', resolved_at = ? WHERE lead_id = ? AND state = 'pending'")
     .run(nowIso(), leadId);
   db.prepare('INSERT INTO assignments (lead_id, team_id) VALUES (?, ?)').run(leadId, teamId);
-  db.prepare("UPDATE leads SET status = 'assigned', assigned_team = ?, updated_at = ? WHERE id = ?")
-    .run(teamId, nowIso(), leadId);
+  db.prepare(`UPDATE leads SET status = 'assigned', assigned_team = ?, assigned_at = ?,
+                status_changed_at = ?, updated_at = ? WHERE id = ?`)
+    .run(teamId, nowIso(), nowIso(), nowIso(), leadId);
   logEvent(db, { leadId, teamId, kind: 'assigned_manually' });
   queueSheetWrite(db, lead);
   db.prepare("UPDATE leads SET argus_state = 'pending', argus_attempts = 0 WHERE id = ?").run(leadId);
