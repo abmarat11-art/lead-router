@@ -5,7 +5,9 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const REQUIRED = ['company', 'phone', 'lead_type', 'status'];
+const REQUIRED = ['company', 'lead_type', 'status'];
+// Контакт строки: либо телефон в таблице, либо id компании Б24 — карточку дотянем сами.
+const CONTACT_SOURCES = ['phone', 'b24_company_id'];
 const KNOWN = ['company', 'contact_name', 'phone', 'email', 'lead_gen', 'region',
   'lead_type', 'status', 'b24_company_id', 'debt_closed'];
 
@@ -59,6 +61,9 @@ export function resolveConfig(raw = {}) {
 
   const missing = REQUIRED.filter((f) => index[f] === null);
   if (missing.length) throw new Error(`в config/columns.json не заданы обязательные колонки: ${missing.join(', ')}`);
+  if (CONTACT_SOURCES.every((f) => index[f] === null)) {
+    throw new Error(`в config/columns.json нужна хотя бы одна колонка из: ${CONTACT_SOURCES.join(', ')}`);
+  }
 
   const seen = new Map();
   for (const [field, i] of Object.entries(index)) {

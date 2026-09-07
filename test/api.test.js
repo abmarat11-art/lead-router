@@ -4,6 +4,11 @@ import { createServer } from 'node:http';
 import { openMigrated } from '../src/db/index.js';
 import { createHandler } from '../src/http/api.js';
 
+import { setConfig, DEFAULT_CONFIG } from '../src/core/columns.js';
+
+// тесты живут на схеме по умолчанию, а не на боевом config/columns.json
+setConfig(DEFAULT_CONFIG);
+
 // схема по умолчанию: B компания, C контакт, D телефон, E лидген, F тип, G статус
 const HEAD = ['Дата', 'Компания', 'Контакт', 'Телефон', 'Лидген', 'Тип лида', 'Статус'];
 const rows = (...list) => list.map((cells, i) => ({ key: `Лист1:${i + 2}`, cells }));

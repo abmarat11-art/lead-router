@@ -150,7 +150,7 @@ test('погашение долга ставит галочку напротив
     );
   } finally {
     delete process.env.SHEETS_SPREADSHEET_ID;
-    setConfig(null);
+    setConfig(DEFAULT_CONFIG);
   }
 });
 

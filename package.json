@@ -12,7 +12,8 @@
     "migrate": "node src/db/migrate.js",
     "test": "node --test \"test/*.test.js\"",
     "seed": "node src/db/seed.js",
-    "check-sheet": "node scripts/check-sheet.js"
+    "check-sheet": "node scripts/check-sheet.js",
+    "check-header": "node scripts/check-header.js"
   },
   "dependencies": {
     "google-auth-library": "^9.15.1"

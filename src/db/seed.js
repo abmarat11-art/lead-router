@@ -1,4 +1,5 @@
-// Демо-данные: четыре команды и несколько строк «из таблицы».
+// Базовые данные: четыре команды. Демо-строки — только по флагу SEED_DEMO_ROWS=1:
+// боевая таблица использует те же ключи строк (Лист1:2...), и фикстуры их затирают.
 import { openMigrated } from './index.js';
 import { importBatch } from '../core/importer.js';
 import { dispatchQueue } from '../core/queue.js';
@@ -23,5 +24,9 @@ const values = [
   ['02.09.2026', '', '', '', 'Лидген-2', '', ''],
 ];
 
-console.log('импорт:', importBatch(db, toBatch(values, cfg), cfg));
-console.log('распределение:', dispatchQueue(db));
+if (process.env.SEED_DEMO_ROWS === '1') {
+  console.log('импорт:', importBatch(db, toBatch(values, cfg), cfg));
+  console.log('распределение:', dispatchQueue(db));
+} else {
+  console.log('команды готовы; демо-строки пропущены (SEED_DEMO_ROWS=1 — залить их)');
+}

@@ -2,24 +2,32 @@
   "sheet": "Лист1",
   "firstDataRow": 2,
 
-  "_comment": "Колонки задаются буквой (A, B, ... AA) или номером (1, 2, ...). Обязательны только company/phone/lead_type/status. b24_company_id — id компании в Б24 для дозагрузки, debt_closed — чекбокс «долг закрыт» напротив фрода.",
+  "_comment": "Реальная раскладка таблицы отдела лидогенерации (сверено 07.09.2026). Колонки задаются буквой (A, B, ... AA) или номером. Обязательны company/lead_type/status плюс хотя бы одно из phone/b24_company_id.",
+  "_sheetHeader": {
+    "A": "Дата отправки", "B": "Тип", "C": "Компания", "D": "ID компании",
+    "E": "Ссылка", "F": "Направление", "G": "Язык директора", "H": "Комментарий",
+    "I": "Компания остается в работе", "J": "Дата встречи", "K": "Время встречи",
+    "L": "Адрес", "M": "Сотрудник", "N": "ID сотрудника", "O": "Исполнитель лида",
+    "P": "Статус (пишем мы и СРМ)", "Q": "Долг закрыт"
+  },
+
   "columns": {
-    "company": "B",
-    "contact_name": "C",
-    "phone": "D",
+    "company": "C",
+    "contact_name": null,
+    "phone": null,
     "email": null,
-    "lead_gen": "E",
+    "lead_gen": "O",
     "region": null,
-    "lead_type": "F",
-    "status": "G",
-    "b24_company_id": null,
-    "debt_closed": null
+    "lead_type": "B",
+    "status": "P",
+    "b24_company_id": "D",
+    "debt_closed": "Q"
   },
 
   "_comment2": "Точные значения в таблице. Сравнение без учёта регистра и лишних пробелов.",
   "leadTypes": {
-    "lead": "лид",
-    "meeting": "встреча"
+    "lead": "Лид",
+    "meeting": "Встреча"
   },
   "statuses": {
     "assigned": "назначено",

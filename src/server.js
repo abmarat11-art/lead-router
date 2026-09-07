@@ -7,7 +7,7 @@ import { withAuth, authEnabled } from './http/auth.js';
 import { importBatch } from './core/importer.js';
 import { dispatchQueue } from './core/queue.js';
 import { flushOutbox } from './core/webhooks.js';
-import { flushSheetWrites } from './core/sheetWriter.js';
+import { flushSheetWrites, sheetReadonly } from './core/sheetWriter.js';
 import { getConfig } from './core/columns.js';
 import { enrichPending } from './core/enrichment.js';
 import { deliverPending } from './core/argusDelivery.js';
@@ -19,6 +19,7 @@ const log = (...a) => console.log(new Date().toISOString(), ...a);
 
 const columns = getConfig();   // упадём на старте, если схема таблицы кривая
 log(`схема таблицы: лист "${columns.sheet}", статус в колонке ${columns.statusColumn}`);
+if (sheetReadonly()) log('SHEET_READONLY=1 — таблицу только читаем, пометки копятся в очереди');
 
 async function importNow() {
   const { fetchBatch } = await import('./adapters/sheets.js');

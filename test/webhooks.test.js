@@ -6,6 +6,11 @@ import { enqueueWebhook, flushOutbox } from '../src/core/webhooks.js';
 import { assignNext, markDeclined, markInWork } from '../src/core/queue.js';
 import { flushSheetWrites } from '../src/core/sheetWriter.js';
 
+import { setConfig, DEFAULT_CONFIG } from '../src/core/columns.js';
+
+// тесты живут на схеме по умолчанию, а не на боевом config/columns.json
+setConfig(DEFAULT_CONFIG);
+
 function setup() {
   const db = openMigrated(':memory:');
   db.prepare('INSERT INTO teams (id, name, queue_order) VALUES (1, ?, 1)').run('Команда 1');
@@ -122,4 +127,19 @@ test('сбой записи в таблицу не теряет пометку',
   const row = db.prepare('SELECT * FROM sheet_writes').get();
   assert.equal(row.state, 'pending');
   assert.match(row.last_error, /quota/);
+});
+
+test('SHEET_READONLY=1 — пометки копятся, но в таблицу не уходят', async () => {
+  process.env.SHEETS_SPREADSHEET_ID = 'sheet-id';
+  const db = setup();
+  assignNext(db, 1);
+  process.env.SHEET_READONLY = '1';
+  try {
+    const res = await flushSheetWrites(db);
+    assert.deepEqual(res, { picked: 0, written: 0, failed: 0, readonly: true });
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM sheet_writes WHERE state = 'pending'").get().n, 1,
+      'пометка ждёт своего часа, а не теряется');
+  } finally {
+    delete process.env.SHEET_READONLY;
+  }
 });

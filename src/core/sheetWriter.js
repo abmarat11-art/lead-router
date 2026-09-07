@@ -3,7 +3,11 @@
 const nowIso = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 const MAX_ATTEMPTS = 5;
 
+/** Пока схема таблицы не согласована, ставим SHEET_READONLY=1: пометки копятся, но наружу не уходят. */
+export const sheetReadonly = () => process.env.SHEET_READONLY === '1';
+
 export async function flushSheetWrites(db, { limit = 20, write } = {}) {
+  if (!write && sheetReadonly()) return { picked: 0, written: 0, failed: 0, readonly: true };
   const writer = write || (await import('../adapters/sheets.js')).writeBackStatus;
   const rows = db.prepare("SELECT * FROM sheet_writes WHERE state = 'pending' ORDER BY id LIMIT ?").all(limit);
 
