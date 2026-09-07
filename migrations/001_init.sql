@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS queue_state (
   cursor  INTEGER NOT NULL DEFAULT 0        -- queue_order команды, которая получила последней
 );
 
--- Внеочередники: команда, получившая отказ из СРМ, встаёт следующей.
+-- Долги: команда получила фрод вместо своего хода, компенсируем вне очереди.
 CREATE TABLE IF NOT EXISTS queue_priority (
   id          INTEGER PRIMARY KEY,
   kind        TEXT NOT NULL,
@@ -39,10 +39,10 @@ CREATE TABLE IF NOT EXISTS leads (
   raw            TEXT NOT NULL DEFAULT '{}',
   dedup_key      TEXT,
   source_status  TEXT,                      -- что сейчас написано в колонке «статус» шита
-  -- new | assigned | in_work | escalated | quarantine
+  -- new | assigned | in_work | rejected (фрод) | escalated | quarantine
   status         TEXT NOT NULL DEFAULT 'new',
   assigned_team  INTEGER REFERENCES teams(id),
-  decline_count  INTEGER NOT NULL DEFAULT 0,
+  decline_count  INTEGER NOT NULL DEFAULT 0,   -- сколько раз строку отметили фродом
   quarantine_reason TEXT,
   imported_at    TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at     TEXT NOT NULL DEFAULT (datetime('now'))

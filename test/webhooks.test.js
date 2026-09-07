@@ -40,12 +40,15 @@ test('назначение кладёт lead.assigned с компанией и �
   assert.equal(payload.team.name, 'Команда 1');
 });
 
-test('цикл отказа даёт lead.declined и следующий lead.assigned', () => {
+test('фрод шлёт lead.declined и на этом цикл компании закрыт', () => {
   const db = setup();
   assignNext(db, 1);
-  markDeclined(db, 1, 'не наш профиль');
+  markDeclined(db, 1, 'фрод от лидгена');
   const events = db.prepare('SELECT event FROM webhook_outbox ORDER BY id').all().map((r) => r.event);
-  assert.deepEqual(events, ['lead.assigned', 'lead.declined', 'lead.assigned']);
+  assert.deepEqual(events, ['lead.assigned', 'lead.declined']);
+  const payload = JSON.parse(db.prepare("SELECT payload FROM webhook_outbox WHERE event = 'lead.declined'").get().payload);
+  assert.equal(payload.reason, 'фрод от лидгена');
+  assert.equal(payload.team.name, 'Команда 1');
 });
 
 test('«в работе» уходит в СРМ отдельным событием', () => {

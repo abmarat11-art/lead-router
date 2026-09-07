@@ -40,33 +40,39 @@ test('лиды и встречи — независимые очереди', () 
   assert.equal(assign(db, 'lead'), 3);
 });
 
-test('отказ ставит команду вне очереди: 1,2,3 → отказ от 1 → 1,4,1,2,3,4', () => {
+test('фрод даёт команде долг: 1,2,3 → фрод у 1 → 1,4,1,2,3', () => {
   const db = setup();
   const first = addLead(db);                 // команда 1
   assignNext(db, first);
   assign(db);                                // 2
   assign(db);                                // 3
 
-  markDeclined(db, first, 'отказ из СРМ');   // команда 1 встаёт вне очереди
+  markDeclined(db, first, 'фрод');           // ход команды 1 ушёл впустую
 
-  // сама отказанная компания уходит дальше по кругу, мимо отказавшей команды
-  assert.equal(db.prepare('SELECT assigned_team t FROM leads WHERE id = ?').get(first).t, 4);
+  // компания закрыта и никому больше не идёт
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(first);
+  assert.equal(lead.status, 'rejected');
+  assert.equal(lead.assigned_team, 1, 'в истории остаётся, кому её выдали');
 
-  // а внеочередной приоритет команды 1 достаётся следующей новой компании
-  const got = Array.from({ length: 5 }, () => assign(db));
-  assert.deepEqual(got, [1, 4, 1, 2, 3]);
+  // долг гасится следующей компанией, дальше обычный круг с места остановки
+  assert.deepEqual(Array.from({ length: 5 }, () => assign(db)), [1, 4, 1, 2, 3]);
 });
 
-test('внеочередник достаётся и возвращённой компании, если она ему подходит', () => {
+test('несколько долгов гасятся в порядке поступления', () => {
   const db = setup();
   const a = addLead(db); assignNext(db, a);  // 1
   const b = addLead(db); assignNext(db, b);  // 2
-  markDeclined(db, b, 'отказ');              // приоритет: 2; сама компания b уходит к 3
-  assert.equal(db.prepare('SELECT assigned_team t FROM leads WHERE id = ?').get(b).t, 3);
-  markDeclined(db, a, 'отказ');              // приоритет: 2 и 1; компания a достаётся внеочередной 2
-  assert.equal(db.prepare('SELECT assigned_team t FROM leads WHERE id = ?').get(a).t, 2);
-  // остался внеочередник 1, дальше круг продолжается с места остановки
-  assert.deepEqual(Array.from({ length: 4 }, () => assign(db)), [1, 3, 4, 1]);
+  markDeclined(db, b, 'фрод');               // долг: 2
+  markDeclined(db, a, 'фрод');               // долг: 2, затем 1
+  assert.deepEqual(Array.from({ length: 5 }, () => assign(db)), [2, 1, 3, 4, 1]);
+});
+
+test('долг привязан к своей очереди: фрод по лиду не двигает встречи', () => {
+  const db = setup();
+  const id = addLead(db, 'lead'); assignNext(db, id);   // лиды: команда 1
+  markDeclined(db, id, 'фрод');
+  assert.equal(assign(db, 'meeting'), 1, 'очередь встреч идёт своим кругом');
+  assert.equal(assign(db, 'lead'), 1, 'долг гасится в очереди лидов');
 });
 
 test('«в работе» из таблицы закрывает назначение', () => {
@@ -78,15 +84,14 @@ test('«в работе» из таблицы закрывает назначе�
   assert.equal(db.prepare('SELECT state s FROM assignments WHERE lead_id = ?').get(id).s, 'in_work');
 });
 
-test('отказ переназначает компанию и не возвращает её отказавшей команде', () => {
+test('фрод закрывает компанию: повторно она не раздаётся', () => {
   const db = setup(2);
   const id = addLead(db);
   assignNext(db, id);                                  // команда 1
-  markDeclined(db, id, 'не наш профиль');
-  assert.equal(db.prepare('SELECT assigned_team t FROM leads WHERE id = ?').get(id).t, 2);
-  markDeclined(db, id, 'тоже мимо');
-  // обе команды отказались — компания на стол руководителю, а не по кругу
-  assert.equal(db.prepare('SELECT status s FROM leads WHERE id = ?').get(id).s, 'escalated');
+  markDeclined(db, id, 'фрод от лидгена');
+  assert.equal(db.prepare('SELECT status s FROM leads WHERE id = ?').get(id).s, 'rejected');
+  assert.equal(assignNext(db, id), null, 'закрытую компанию заново не раздаём');
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM assignments WHERE lead_id = ?').get(id).c, 1);
 });
 
 test('неактивная команда выпадает из круга', () => {
@@ -120,10 +125,10 @@ test('dispatchQueue разбирает пул по обеим очередям',
   assert.equal(db.prepare("SELECT COUNT(*) c FROM leads WHERE status = 'assigned'").get().c, 3);
 });
 
-test('превью очереди показывает внеочередников', () => {
+test('превью очереди показывает долги', () => {
   const db = setup();
   const id = addLead(db); assignNext(db, id);
-  markDeclined(db, id, 'отказ');
+  markDeclined(db, id, 'фрод');
   const preview = queuePreview(db, 'lead', 4).map((p) => p.team_id);
   assert.equal(preview[0], 1);
   assert.equal(queuePreview(db, 'lead', 4)[0].via_priority, true);

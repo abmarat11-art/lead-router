@@ -59,8 +59,8 @@ export function importBatch(db, batch) {
 
     const leadStatus = problems.length ? 'quarantine'
       : status === 'in_work' ? 'in_work'
-      : status === 'declined' ? 'new'
-      : status ? 'assigned'      // строка уже помечена кем-то — в очередь не лезем
+      : status === 'declined' ? 'rejected'   // фрод: строка закрыта, в очередь не идёт
+      : status ? 'assigned'                  // строка уже помечена кем-то — не трогаем
       : 'new';
 
     const info = db.prepare(`INSERT INTO leads

@@ -73,7 +73,7 @@ test('СРМ поставила «в работе» — контур это по
   assert.equal(db.prepare('SELECT status s FROM leads').get().s, 'in_work');
 });
 
-test('СРМ поставила «отказ» — компания уходит следующей команде, отказавшая встаёт вне очереди', () => {
+test('СРМ поставила «отказ» — компания закрывается, команде записывается долг', () => {
   const db = setup();
   importBatch(db, toBatch([HEADERS, row()], 'Лист1'));
   db.prepare("UPDATE leads SET status = 'assigned', assigned_team = 1").run();
@@ -81,8 +81,15 @@ test('СРМ поставила «отказ» — компания уходит
 
   const stats = importBatch(db, toBatch([HEADERS, row({ 6: 'Отказ' })], 'Лист1'));
   assert.equal(stats.declined, 1);
-  assert.equal(db.prepare('SELECT assigned_team t FROM leads').get().t, 2);
+  assert.equal(db.prepare('SELECT status s FROM leads').get().s, 'rejected');
   assert.equal(db.prepare("SELECT COUNT(*) c FROM queue_priority WHERE team_id = 1 AND consumed_at IS NULL").get().c, 1);
+});
+
+test('строка, помеченная фродом до первого импорта, в очередь не идёт', () => {
+  const db = setup();
+  importBatch(db, toBatch([HEADERS, row({ 6: 'Отказ' })], 'Лист1'));
+  assert.equal(db.prepare('SELECT status s FROM leads').get().s, 'rejected');
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM queue_priority').get().c, 0);
 });
 
 test('строка, уже помеченная в таблице, в очередь не попадает', () => {

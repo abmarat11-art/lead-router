@@ -48,7 +48,7 @@ test('заливка строк и распределение по кругу к
   assert.equal(byCompany['Delta Trade'], 'Команда 1');   // встречи — своя очередь
 }));
 
-test('отказ из СРМ через таблицу двигает очередь', () => withServer(async ({ call }) => {
+test('фрод из СРМ закрывает компанию и даёт команде долг', () => withServer(async ({ call }) => {
   await call('/api/import/rows', 'POST', {
     headers: HEADERS, rows: rows(['ООО Ромашка', '901234567', 'Аня', 'Лид', '']),
   });
@@ -59,13 +59,13 @@ test('отказ из СРМ через таблицу двигает очере
     headers: HEADERS, rows: rows(['ООО Ромашка', '901234567', 'Аня', 'Лид', 'Отказ']),
   });
 
-  const [lead] = (await call('/api/leads?status=assigned')).body;
-  assert.equal(lead.team_name, 'Команда 2');
+  assert.equal((await call('/api/leads?status=assigned')).body.length, 0);
+  const [lead] = (await call('/api/leads?status=rejected')).body;
+  assert.equal(lead.company, 'ООО Ромашка');
 
-  const queues = (await call('/api/queues')).body;
-  const leadQueue = queues.find((q) => q.kind === 'lead');
+  const leadQueue = (await call('/api/queues')).body.find((q) => q.kind === 'lead');
   assert.equal(leadQueue.priority[0].team_name, 'Команда 1');
-  assert.equal(leadQueue.preview[0].team_id, 1);
+  assert.equal(leadQueue.preview[0].team_id, 1, 'долг гасится следующей компанией');
 }));
 
 test('ручное назначение и отметка «в работе»', () => withServer(async ({ call }) => {

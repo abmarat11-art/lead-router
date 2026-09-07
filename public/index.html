@@ -25,7 +25,7 @@
   .tag.new { background:#1d2b45; color:#8ab4ff }
   .tag.assigned { background:#3a2f14; color:var(--warn) }
   .tag.in_work { background:#14321f; color:var(--ok) }
-  .tag.escalated,.tag.quarantine { background:#3a1a1f; color:var(--bad) }
+  .tag.escalated,.tag.quarantine,.tag.rejected { background:#3a1a1f; color:var(--bad) }
   .cards { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 16px; min-width:110px; }
   .card b { display:block; font-size:22px; }
@@ -47,7 +47,7 @@
 </header>
 <main id="view">загрузка…</main>
 <script>
-const TABS = [['new','Пул'],['assigned','Назначены'],['in_work','В работе'],['quarantine','Карантин'],['escalated','Эскалация'],['queues','Очереди'],['teams','Команды']];
+const TABS = [['new','Пул'],['assigned','Назначены'],['in_work','В работе'],['rejected','Фрод'],['quarantine','Карантин'],['escalated','Эскалация'],['queues','Очереди'],['teams','Команды']];
 const KIND_RU = { lead: 'лид', meeting: 'встреча' };
 let tab = 'new', teams = [], queues = [], data = [], st = {};
 
@@ -93,7 +93,7 @@ function renderLeads() {
         ${l.status === 'quarantine' ? `<button class="ghost" onclick="act(${l.id},'release')">В пул</button>` : ''}
         ${['new','escalated'].includes(l.status) ? `<button class="ghost" onclick="act(${l.id},'assign')">Назначить по очереди</button>` : ''}
         ${l.status === 'assigned' ? `<button class="ghost" onclick="act(${l.id},'in-work')">В работе</button>
-          <button class="ghost" onclick="act(${l.id},'decline')">Отказ</button>` : ''}
+          <button class="ghost" onclick="act(${l.id},'decline')">Фрод</button>` : ''}
         <select onchange="assignTo(${l.id}, this.value)"><option value="">команде…</option>${opts}</select>
       </td></tr>`).join('') + '</table>';
 }
@@ -106,12 +106,12 @@ function renderQueues() {
     <div class="chain">${q.preview.map(p =>
       `<span class="chip ${p.via_priority ? 'prio' : ''}">${esc(teamName(p.team_id))}${p.via_priority ? ' ↑' : ''}</span>`).join('<span class="dim">→</span>')}</div>
     <p class="dim">${q.priority.length
-      ? 'вне очереди после отказа: ' + q.priority.map(p => esc(p.team_name)).join(', ')
+      ? 'долг после фрода: ' + q.priority.map(p => esc(p.team_name)).join(', ')
       : 'внеочередников нет, идёт обычный круг'}</p>`).join('');
 }
 
 function renderTeams() {
-  return `<table><tr><th>Порядок</th><th>Команда</th><th>Назначено сейчас</th><th>Взяли в работу</th><th>Отказов</th><th>Активна</th></tr>` +
+  return `<table><tr><th>Порядок</th><th>Команда</th><th>Назначено сейчас</th><th>Взяли в работу</th><th>Фрод</th><th>Активна</th></tr>` +
     (st.teams || []).map(t => `<tr>
       <td>${t.queue_order}</td><td>${esc(t.name)}</td>
       <td>${t.pending || 0}</td><td>${t.in_work || 0}</td><td>${t.declined || 0}</td>
