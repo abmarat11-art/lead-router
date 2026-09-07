@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { findCompanyByInn, createCompany, ensureCompany } from '../src/adapters/argus.js';
+import { findCompanyByInn, createCompany, ensureCompany, okedCode } from '../src/adapters/argus.js';
 
 const COMPANY = {
   b24_id: '4021',
@@ -32,9 +32,21 @@ test('без ARGUS_API_URL адаптер честно падает', async () =
   await assert.rejects(() => createCompany(COMPANY), /ARGUS_API_URL не задан/);
 });
 
-test('поиск по ИНН фильтрует список сам, потому что Аргус этого не делает', async () => {
-  const id = await findCompanyByInn('301447821', { fetchImpl: async () => ok(LIST) });
+test('поиск по ИНН уходит фильтром в теле запроса', async () => {
+  const seen = [];
+  const id = await findCompanyByInn('301447821', {
+    fetchImpl: async (url, init) => { seen.push({ url, body: JSON.parse(init.body) }); return ok(LIST); },
+  });
   assert.equal(id, 'baa1dbcb');
+  assert.match(seen[0].url, /\/companies\.list$/);
+  assert.deepEqual(seen[0].body, { filter: { INN: '301447821' } });
+});
+
+test('код ОКЭД вытаскивается из строки Б24', () => {
+  assert.equal(okedCode('14120 - Производство спецодежды'), '14120');
+  assert.equal(okedCode('14120'), '14120');
+  assert.equal(okedCode(''), null);
+  assert.equal(okedCode(null), null);
 });
 
 test('ИНН сверяется по цифрам, лишние символы не мешают', async () => {
@@ -47,7 +59,7 @@ test('незнакомый ИНН — компании нет', async () => {
   assert.equal(await findCompanyByInn(null, { fetchImpl: async () => ok(LIST) }), null);
 });
 
-test('создание шлёт поля в формате Аргуса', async () => {
+test('создание шлёт fields в формате Аргуса', async () => {
   const seen = [];
   const id = await createCompany(COMPANY, {
     fetchImpl: async (url, init) => { seen.push({ url, body: JSON.parse(init.body) }); return ok({ ID: 'new-123' }); },
@@ -55,22 +67,49 @@ test('создание шлёт поля в формате Аргуса', async 
   assert.equal(id, 'new-123');
   assert.match(seen[0].url, /\/companies\.add$/);
 
-  const body = seen[0].body;
-  assert.equal(body.TITLE, 'ООО Ромашка');
-  assert.equal(body.INN, '301447821');
-  assert.equal(body.WEB, 'https://orginfo.uz/organization/1f31442fff2f/');
-  assert.deepEqual(body.PHONE, [
+  const { fields } = seen[0].body;
+  assert.ok(fields, 'тело обёрнуто в fields, как у Б24');
+  assert.equal(fields.TITLE, 'ООО Ромашка');
+  assert.equal(fields.INN, '301447821');
+  assert.equal(fields.ORGINFO, 'https://orginfo.uz/organization/1f31442fff2f/');
+  assert.equal(fields.OKED, '14120', 'ОКЭД уходит кодом, а не строкой с названием');
+  assert.deepEqual(fields.PHONE, [
     { VALUE: '+998901234567', VALUE_TYPE: 'WORK' },
     { VALUE: '+998901112233', VALUE_TYPE: 'WORK' },
   ]);
-  assert.deepEqual(body.EMAIL, [{ VALUE: 'i@r.uz', VALUE_TYPE: 'WORK' }]);
-  assert.match(body.COMMENTS, /Иванов Иван/);
+  assert.deepEqual(fields.EMAIL, [{ VALUE: 'i@r.uz', VALUE_TYPE: 'WORK' }]);
+  assert.equal(fields.CONTACT_NAME, 'Иванов Иван');
+  assert.equal(fields.CONTACT_PHONE, '+998901234567');
+  assert.equal(fields.CONTACT_EMAIL, 'i@r.uz');
+});
+
+test('без ИНН компанию не отправляем: Аргус её всё равно не примет', async () => {
+  let called = 0;
+  await assert.rejects(
+    () => createCompany({ ...COMPANY, inn: null }, { fetchImpl: async () => { called++; return ok({ ID: 'x' }); } }),
+    /нет ИНН/
+  );
+  assert.equal(called, 0, 'зря в API не ходим');
+});
+
+test('превышение лимита 60/мин — один повтор, а не падение', async () => {
+  let calls = 0;
+  const id = await createCompany(COMPANY, {
+    fetchImpl: async () => {
+      calls++;
+      return calls === 1
+        ? { ok: false, status: 429, json: async () => ({}) }
+        : ok({ ID: 'after-retry' });
+    },
+  });
+  assert.equal(id, 'after-retry');
+  assert.equal(calls, 2);
 });
 
 test('ошибка Аргуса разворачивается в понятный текст', async () => {
   await assert.rejects(
-    () => createCompany({ ...COMPANY, title: null }, { fetchImpl: async () => fail('BAD_REQUEST', 'TITLE обязателен') }),
-    /Аргус companies\.add: TITLE обязателен/
+    () => createCompany(COMPANY, { fetchImpl: async () => fail('BAD_REQUEST', 'OKED неизвестен') }),
+    /Аргус companies\.add: OKED неизвестен/
   );
 });
 
