@@ -46,9 +46,17 @@ export function toBatch(values, cfg) {
   const first = cfg.firstDataRow ?? 2;
   const rows = values
     .map((cells, i) => ({ key: `${cfg.sheet}:${i + 1}`, cells, row: i + 1 }))
-    .filter((r) => r.row >= first && r.cells.some((c) => String(c ?? '').trim()))
+    .filter((r) => r.row >= first && hasData(r.cells, cfg))
     .map(({ key, cells }) => ({ key, cells }));
   return { rows };
+}
+
+// Строка живая, только если данные есть вне служебных колонок.
+// Чекбокс «долг закрыт» Google проставляет FALSE на весь столбец до конца листа,
+// и без этой проверки контур принял бы тысячу пустых строк за лиды.
+function hasData(cells, cfg) {
+  const service = new Set([cfg.index?.status, cfg.index?.debt_closed].filter((i) => i !== null && i !== undefined));
+  return cells.some((c, i) => !service.has(i) && String(c ?? '').trim());
 }
 
 // Обратная запись в шит: ставим статус напротив компании в её же строке.

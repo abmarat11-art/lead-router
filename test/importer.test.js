@@ -107,3 +107,17 @@ test('колонки вне схемы сохраняются в raw по сво
   importBatch(db, toBatch([[...HEAD, 'Источник'], [...row(), 'Instagram']], CFG), CFG);
   assert.equal(JSON.parse(db.prepare('SELECT raw FROM leads').get().raw).H, 'Instagram');
 });
+
+test('строка, где заполнен только служебный чекбокс, за лид не считается', () => {
+  // Google проставляет FALSE во весь столбец чекбокса до конца листа
+  const CHK = resolveConfig({ ...DEFAULT_CONFIG,
+    columns: { ...DEFAULT_CONFIG.columns, debt_closed: 'H' } });
+  const batch = toBatch([
+    ['Дата', 'Компания', 'Контакт', 'Телефон', 'Лидген', 'Тип', 'Статус', 'Долг'],
+    ['01.09', 'ООО Ромашка', 'Иван', '901234567', 'Аня', 'Лид', '', 'FALSE'],
+    ['', '', '', '', '', '', '', 'FALSE'],
+    ['', '', '', '', '', '', 'назначено', 'FALSE'],
+  ], CHK);
+  assert.deepEqual(batch.rows.map((r) => r.key), ['Лист1:2'],
+    'пустые строки с одним лишь чекбоксом и статусом отсекаются');
+});
