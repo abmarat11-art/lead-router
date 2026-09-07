@@ -76,6 +76,11 @@ export function createHandler(db, { importNow } = {}) {
       // ---- действия ----
       if (req.method === 'POST' && p === '/api/dispatch') return json(res, 200, dispatchQueue(db));
 
+      if (req.method === 'POST' && p === '/api/enrich') {
+        const { enrichPending } = await import('../core/enrichment.js');
+        return json(res, 200, await enrichPending(db));
+      }
+
       if (req.method === 'POST' && p === '/api/import') {
         if (!importNow) return json(res, 501, { error: 'источник не настроен' });
         return json(res, 200, await importNow());

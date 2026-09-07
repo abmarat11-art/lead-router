@@ -44,6 +44,7 @@
   <div class="spacer"></div>
   <button class="ghost" onclick="api('/api/import','POST').then(load)">Опросить таблицу</button>
   <button class="act" onclick="api('/api/dispatch','POST').then(load)">Распределить пул</button>
+  <button class="ghost" onclick="fetch('/api/logout').then(()=>location.href='/login.html')">Выйти</button>
 </header>
 <main id="view">загрузка…</main>
 <script>
@@ -52,7 +53,8 @@ const KIND_RU = { lead: 'лид', meeting: 'встреча' };
 let tab = 'new', teams = [], queues = [], data = [], st = {};
 
 const api = (url, method = 'GET', body) =>
-  fetch(url, { method, headers: { 'content-type': 'application/json' }, body: body && JSON.stringify(body) }).then(r => r.json());
+  fetch(url, { method, headers: { 'content-type': 'application/json' }, body: body && JSON.stringify(body) })
+    .then(r => { if (r.status === 401) location.href = '/login.html'; return r.json(); });
 
 const esc = (s) => String(s ?? '').replace(/[<>&]/g, c => ({ '<':'&lt;','>':'&gt;','&':'&amp;' }[c]));
 const teamName = (id) => teams.find(t => t.id === id)?.name || id;

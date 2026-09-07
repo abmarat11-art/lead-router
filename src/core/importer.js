@@ -8,12 +8,13 @@ import { markInWork, markDeclined, logEvent } from './queue.js';
 const nowIso = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 
 const LEAD_FIELDS = `company = ?, contact_name = ?, phone = ?, email = ?, lead_gen = ?,
-  kind = ?, region = ?, raw = ?, dedup_key = ?, source_status = ?, source_hash = ?, updated_at = ?`;
+  kind = ?, region = ?, raw = ?, dedup_key = ?, source_status = ?, b24_company_id = ?,
+  source_hash = ?, updated_at = ?`;
 
 const leadValues = (lead, hash) => [
   lead.company, lead.contact_name, lead.phone, lead.email, lead.lead_gen,
   lead.kind, lead.region, JSON.stringify(lead.raw), lead.dedup_key,
-  lead.source_status, hash, nowIso(),
+  lead.source_status, lead.b24_company_id, hash, nowIso(),
 ];
 
 /**
@@ -64,13 +65,17 @@ export function importBatch(db, batch, config = loadConfig()) {
       : status ? 'assigned'                  // строка уже помечена кем-то — не трогаем
       : 'new';
 
+    // есть id компании из Б24 — карточку и компанию в Аргусе заводим до раздачи
+    const needsEnrich = leadStatus === 'new' && !!lead.b24_company_id;
+
     const info = db.prepare(`INSERT INTO leads
       (source_key, source_hash, company, contact_name, phone, email, lead_gen, kind,
-       region, raw, dedup_key, source_status, status, quarantine_reason)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+       region, raw, dedup_key, source_status, b24_company_id, enrich_state, status, quarantine_reason)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(row.key, hash, lead.company, lead.contact_name, lead.phone, lead.email,
            lead.lead_gen, lead.kind, lead.region, JSON.stringify(lead.raw),
-           lead.dedup_key, lead.source_status, leadStatus,
+           lead.dedup_key, lead.source_status, lead.b24_company_id,
+           needsEnrich ? 'pending' : 'ready', leadStatus,
            problems.length ? problems.join('; ') : null);
 
     const id = Number(info.lastInsertRowid);

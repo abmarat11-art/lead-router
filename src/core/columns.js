@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const REQUIRED = ['company', 'phone', 'lead_type', 'status'];
-const KNOWN = ['company', 'contact_name', 'phone', 'email', 'lead_gen', 'region', 'lead_type', 'status'];
+const KNOWN = ['company', 'contact_name', 'phone', 'email', 'lead_gen', 'region',
+  'lead_type', 'status', 'b24_company_id', 'debt_closed'];
 
 export const DEFAULT_CONFIG = {
   sheet: 'Лист1',
@@ -14,6 +15,7 @@ export const DEFAULT_CONFIG = {
   columns: { company: 'B', contact_name: 'C', phone: 'D', lead_gen: 'E', lead_type: 'F', status: 'G' },
   leadTypes: { lead: 'лид', meeting: 'встреча' },
   statuses: { assigned: 'назначено', in_work: 'в работе', declined: 'отказ' },
+  debtClosedValue: 'TRUE',
 };
 
 // "A" -> 0, "C" -> 2, "AA" -> 26; число 3 -> 2 (колонки в конфиге считаются с единицы).
@@ -65,7 +67,12 @@ export function resolveConfig(raw = {}) {
     seen.set(i, field);
   }
 
-  return { ...cfg, index, statusColumn: columnLetter(index.status) };
+  return {
+    ...cfg,
+    index,
+    statusColumn: columnLetter(index.status),
+    debtColumn: index.debt_closed === null ? null : columnLetter(index.debt_closed),
+  };
 }
 
 export function loadConfig(path = process.env.COLUMNS_CONFIG || join(ROOT, 'config', 'columns.json')) {

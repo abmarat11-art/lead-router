@@ -2,7 +2,7 @@
   "sheet": "Лист1",
   "firstDataRow": 2,
 
-  "_comment": "Колонки задаются буквой (A, B, ... AA) или номером (1, 2, ...). Лишние поля можно убрать — они необязательны, кроме company/phone/lead_type/status.",
+  "_comment": "Колонки задаются буквой (A, B, ... AA) или номером (1, 2, ...). Обязательны только company/phone/lead_type/status. b24_company_id — id компании в Б24 для дозагрузки, debt_closed — чекбокс «долг закрыт» напротив фрода.",
   "columns": {
     "company": "B",
     "contact_name": "C",
@@ -11,7 +11,9 @@
     "lead_gen": "E",
     "region": null,
     "lead_type": "F",
-    "status": "G"
+    "status": "G",
+    "b24_company_id": null,
+    "debt_closed": null
   },
 
   "_comment2": "Точные значения в таблице. Сравнение без учёта регистра и лишних пробелов.",
@@ -23,5 +25,8 @@
     "assigned": "назначено",
     "in_work": "в работе",
     "declined": "отказ"
-  }
+  },
+
+  "_comment3": "Что писать в чекбокс «долг закрыт». Для чекбокса Google Sheets это TRUE.",
+  "debtClosedValue": "TRUE"
 }

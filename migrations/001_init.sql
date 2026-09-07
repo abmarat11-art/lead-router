@@ -19,9 +19,11 @@ CREATE TABLE IF NOT EXISTS queue_priority (
   id          INTEGER PRIMARY KEY,
   kind        TEXT NOT NULL,
   team_id     INTEGER NOT NULL REFERENCES teams(id),
+  lead_id     INTEGER REFERENCES leads(id),   -- фрод, из-за которого возник долг
   reason      TEXT,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  consumed_at TEXT
+  consumed_at TEXT,
+  closed_lead_id INTEGER REFERENCES leads(id) -- компания, которой долг погасили
 );
 CREATE INDEX IF NOT EXISTS idx_priority_open ON queue_priority(kind, consumed_at, id);
 
@@ -39,6 +41,12 @@ CREATE TABLE IF NOT EXISTS leads (
   raw            TEXT NOT NULL DEFAULT '{}',
   dedup_key      TEXT,
   source_status  TEXT,                      -- что сейчас написано в колонке «статус» шита
+  b24_company_id TEXT,                      -- id компании в Б24 из таблицы
+  argus_company_id TEXT,                    -- id компании в Аргусе после создания
+  -- pending (нужно подтянуть из Б24) | ready | failed
+  enrich_state   TEXT NOT NULL DEFAULT 'ready',
+  enrich_error   TEXT,
+  enrich_attempts INTEGER NOT NULL DEFAULT 0,
   -- new | assigned | in_work | rejected (фрод) | escalated | quarantine
   status         TEXT NOT NULL DEFAULT 'new',
   assigned_team  INTEGER REFERENCES teams(id),
@@ -50,6 +58,7 @@ CREATE TABLE IF NOT EXISTS leads (
 CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
 CREATE INDEX IF NOT EXISTS idx_leads_kind   ON leads(kind, status);
 CREATE INDEX IF NOT EXISTS idx_leads_dedup  ON leads(dedup_key);
+CREATE INDEX IF NOT EXISTS idx_leads_enrich ON leads(enrich_state, status);
 
 -- Журнал назначений: кому отдали и чем закончилось.
 CREATE TABLE IF NOT EXISTS assignments (
@@ -84,6 +93,7 @@ CREATE TABLE IF NOT EXISTS sheet_writes (
   id          INTEGER PRIMARY KEY,
   lead_id     INTEGER NOT NULL REFERENCES leads(id),
   source_key  TEXT NOT NULL,
+  column_ref  TEXT NOT NULL,                    -- буква колонки: статус или «долг закрыт»
   value       TEXT NOT NULL,
   state       TEXT NOT NULL DEFAULT 'pending',   -- pending | written | failed
   attempts    INTEGER NOT NULL DEFAULT 0,

@@ -34,9 +34,10 @@ function setCursor(db, kind, value) {
 }
 
 // За командой остался долг: её ход ушёл на фрод, компенсируем вне очереди.
-export function pushPriority(db, kind, teamId, reason = 'фрод: отказ из СРМ') {
-  db.prepare('INSERT INTO queue_priority (kind, team_id, reason) VALUES (?, ?, ?)').run(kind, teamId, reason);
-  logEvent(db, { teamId, kind: 'queue_debt', data: { queue: kind, reason } });
+export function pushPriority(db, kind, teamId, { leadId = null, reason = 'фрод: отказ из СРМ' } = {}) {
+  db.prepare('INSERT INTO queue_priority (kind, team_id, lead_id, reason) VALUES (?, ?, ?, ?)')
+    .run(kind, teamId, leadId, reason);
+  logEvent(db, { leadId, teamId, kind: 'queue_debt', data: { queue: kind, reason } });
 }
 
 function openPriorities(db, kind) {
@@ -65,12 +66,28 @@ export function peekNext(db, kind) {
 }
 
 // Зафиксировать выдачу: погасить долг либо сдвинуть круговой курсор.
-function commitPick(db, kind, pick) {
+function commitPick(db, kind, pick, closedByLeadId) {
   if (pick.viaPriority) {
-    db.prepare('UPDATE queue_priority SET consumed_at = ? WHERE id = ?').run(nowIso(), pick.viaPriority);
+    const debt = db.prepare('SELECT * FROM queue_priority WHERE id = ?').get(pick.viaPriority);
+    db.prepare('UPDATE queue_priority SET consumed_at = ?, closed_lead_id = ? WHERE id = ?')
+      .run(nowIso(), closedByLeadId, pick.viaPriority);
+    logEvent(db, {
+      leadId: debt.lead_id, teamId: debt.team_id, kind: 'queue_debt_closed',
+      data: { closed_by: closedByLeadId },
+    });
+    markDebtClosedInSheet(db, debt);
     return; // выдача в счёт долга круг не двигает — очередь продолжится с прежнего места
   }
   setCursor(db, kind, pick.team.queue_order);
+}
+
+// Галочка «долг закрыт» напротив той самой фродовой строки в таблице.
+function markDebtClosedInSheet(db, debt) {
+  if (!debt.lead_id || !process.env.SHEETS_SPREADSHEET_ID) return;
+  const cfg = getConfig();
+  if (!cfg.debtColumn) return;
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(debt.lead_id);
+  if (lead) queueSheetWrite(db, lead, cfg.debtColumn, cfg.debtClosedValue);
 }
 
 // Назначить лид следующей команде. Возвращает assignment или null (некому отдать).
@@ -78,6 +95,7 @@ export function assignNext(db, leadId) {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
   if (!lead) throw new Error(`lead ${leadId} not found`);
   if (!['new', 'escalated'].includes(lead.status)) return null;
+  if (lead.enrich_state !== 'ready') return null;   // ждём, пока компания появится в Аргусе
 
   const pick = peekNext(db, lead.kind);
   if (!pick) {
@@ -85,7 +103,7 @@ export function assignNext(db, leadId) {
     return null;
   }
 
-  commitPick(db, lead.kind, pick);
+  commitPick(db, lead.kind, pick, leadId);
 
   const info = db.prepare('INSERT INTO assignments (lead_id, team_id) VALUES (?, ?)').run(leadId, pick.team.id);
   db.prepare("UPDATE leads SET status = 'assigned', assigned_team = ?, updated_at = ? WHERE id = ?")
@@ -99,12 +117,12 @@ export function assignNext(db, leadId) {
   return db.prepare('SELECT * FROM assignments WHERE id = ?').get(Number(info.lastInsertRowid));
 }
 
-// Пометка «назначено» напротив компании. Значение и колонка — из схемы таблицы.
-export function queueSheetWrite(db, lead) {
+// Запись в таблицу напротив строки компании: статус или галочка «долг закрыт».
+export function queueSheetWrite(db, lead, column, value) {
   if (!process.env.SHEETS_SPREADSHEET_ID) return null;   // таблица не подключена
   const cfg = getConfig();
-  const info = db.prepare('INSERT INTO sheet_writes (lead_id, source_key, value) VALUES (?, ?, ?)')
-    .run(lead.id, lead.source_key, cfg.statuses.assigned);
+  const info = db.prepare('INSERT INTO sheet_writes (lead_id, source_key, column_ref, value) VALUES (?, ?, ?, ?)')
+    .run(lead.id, lead.source_key, column || cfg.statusColumn, value ?? cfg.statuses.assigned);
   return Number(info.lastInsertRowid);
 }
 
@@ -129,7 +147,7 @@ export function markDeclined(db, leadId, reason = null) {
   if (a) {
     db.prepare("UPDATE assignments SET state = 'declined', resolved_at = ?, reason = ? WHERE id = ?")
       .run(nowIso(), reason, a.id);
-    pushPriority(db, lead.kind, a.team_id, reason || 'фрод: отказ из СРМ');
+    pushPriority(db, lead.kind, a.team_id, { leadId, reason: reason || 'фрод: отказ из СРМ' });
   }
 
   db.prepare("UPDATE leads SET status = 'rejected', decline_count = decline_count + 1, updated_at = ? WHERE id = ?")
@@ -167,8 +185,9 @@ export function assignManually(db, leadId, teamId) {
 
 // Разобрать пул: всё, что пришло из таблицы с пустым статусом.
 export function dispatchQueue(db, { limit = 100 } = {}) {
+  // компании, которые ещё заводятся в Аргусе, не раздаём
   const leads = db.prepare(
-    "SELECT id FROM leads WHERE status = 'new' ORDER BY imported_at, id LIMIT ?"
+    "SELECT id FROM leads WHERE status = 'new' AND enrich_state = 'ready' ORDER BY imported_at, id LIMIT ?"
   ).all(limit);
   let assigned = 0;
   for (const { id } of leads) if (assignNext(db, id)) assigned++;

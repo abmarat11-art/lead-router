@@ -3,11 +3,13 @@ import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { openMigrated } from './db/index.js';
 import { createHandler } from './http/api.js';
+import { withAuth, authEnabled } from './http/auth.js';
 import { importBatch } from './core/importer.js';
 import { dispatchQueue } from './core/queue.js';
 import { flushOutbox } from './core/webhooks.js';
 import { flushSheetWrites } from './core/sheetWriter.js';
 import { getConfig } from './core/columns.js';
+import { enrichPending } from './core/enrichment.js';
 
 loadEnv();
 
@@ -28,7 +30,8 @@ async function importNow() {
   return { ...stats, ...dispatched };
 }
 
-const server = createServer(createHandler(db, { importNow }));
+const server = createServer(withAuth(createHandler(db, { importNow })));
+log(authEnabled() ? `вход по логину: ${process.env.AUTH_USER}` : 'вход открыт (AUTH_USER не задан)');
 const port = Number(process.env.PORT) || 3000;
 server.listen(port, () => log(`lead-router на http://localhost:${port}`));
 
@@ -39,7 +42,11 @@ every(Number(process.env.IMPORT_INTERVAL_MS) || 60_000, async () => {
   await importNow();
 });
 
-every(30_000, () => {
+every(30_000, async () => {
+  if (process.env.B24_WEBHOOK_URL) {
+    const enriched = await enrichPending(db);
+    if (enriched.picked) log('обогащение', JSON.stringify(enriched));
+  }
   const { assigned } = dispatchQueue(db);
   if (assigned) log(`распределено: ${assigned}`);
 });
