@@ -95,7 +95,7 @@ export function assignNext(db, leadId) {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
   if (!lead) throw new Error(`lead ${leadId} not found`);
   if (!['new', 'escalated'].includes(lead.status)) return null;
-  if (lead.enrich_state !== 'ready') return null;   // ждём, пока компания появится в Аргусе
+  if (lead.enrich_state !== 'ready') return null;   // ждём карточку компании из Б24
 
   const pick = peekNext(db, lead.kind);
   if (!pick) {
@@ -110,8 +110,9 @@ export function assignNext(db, leadId) {
     .run(pick.team.id, nowIso(), leadId);
   logEvent(db, { leadId, teamId: pick.team.id, kind: 'assigned', data: { via_priority: !!pick.viaPriority } });
 
-  // в таблицу — пометка «назначено», в СРМ — вебхук
+  // в таблицу — пометка «назначено»; в Аргус компания уедет уже назначенной
   queueSheetWrite(db, lead);
+  db.prepare("UPDATE leads SET argus_state = 'pending', argus_attempts = 0 WHERE id = ?").run(leadId);
   enqueueWebhook(db, 'lead.assigned', leadId, pick.team.id);
 
   return db.prepare('SELECT * FROM assignments WHERE id = ?').get(Number(info.lastInsertRowid));
@@ -179,6 +180,7 @@ export function assignManually(db, leadId, teamId) {
     .run(teamId, nowIso(), leadId);
   logEvent(db, { leadId, teamId, kind: 'assigned_manually' });
   queueSheetWrite(db, lead);
+  db.prepare("UPDATE leads SET argus_state = 'pending', argus_attempts = 0 WHERE id = ?").run(leadId);
   enqueueWebhook(db, 'lead.assigned', leadId, teamId, { manual: true });
   return { ok: true };
 }

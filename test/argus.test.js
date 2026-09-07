@@ -14,7 +14,7 @@ const COMPANY = {
   }],
 };
 
-// как реально отвечает crm-mvp: фильтр по INN игнорируется, отдаётся весь список
+// ответ crm-mvp на companies.list
 const LIST = [
   { ID: 'ba6e0c1d', TITLE: 'ООО «Демо Клиент»', INN: '305123456', PHONE: [{ VALUE: '+998 90 123-45-67', VALUE_TYPE: 'MOBILE' }] },
   { ID: 'baa1dbcb', TITLE: 'ООО «Логос Групп»', INN: '301447821', PHONE: [{ VALUE: '+998980000000', VALUE_TYPE: 'MOBILE' }] },
@@ -29,7 +29,7 @@ beforeEach(() => {
 
 test('без ARGUS_API_URL адаптер честно падает', async () => {
   delete process.env.ARGUS_API_URL;
-  await assert.rejects(() => createCompany(COMPANY), /ARGUS_API_URL не задан/);
+  await assert.rejects(() => createCompany(COMPANY, {}, {}), /ARGUS_API_URL не задан/);
 });
 
 test('поиск по ИНН уходит фильтром в теле запроса', async () => {
@@ -61,7 +61,7 @@ test('незнакомый ИНН — компании нет', async () => {
 
 test('создание шлёт fields в формате Аргуса', async () => {
   const seen = [];
-  const id = await createCompany(COMPANY, {
+  const id = await createCompany(COMPANY, { assignedById: 'user-2', kind: 'meeting' }, {
     fetchImpl: async (url, init) => { seen.push({ url, body: JSON.parse(init.body) }); return ok({ ID: 'new-123' }); },
   });
   assert.equal(id, 'new-123');
@@ -81,12 +81,14 @@ test('создание шлёт fields в формате Аргуса', async ()
   assert.equal(fields.CONTACT_NAME, 'Иванов Иван');
   assert.equal(fields.CONTACT_PHONE, '+998901234567');
   assert.equal(fields.CONTACT_EMAIL, 'i@r.uz');
+  assert.equal(fields.ASSIGNED_BY_ID, 'user-2', 'компания заводится сразу на ответственного команды');
+  assert.equal(fields.LEAD_TYPE, 'Встреча', 'тип пишется в отдельное поле');
 });
 
 test('без ИНН компанию не отправляем: Аргус её всё равно не примет', async () => {
   let called = 0;
   await assert.rejects(
-    () => createCompany({ ...COMPANY, inn: null }, { fetchImpl: async () => { called++; return ok({ ID: 'x' }); } }),
+    () => createCompany({ ...COMPANY, inn: null }, {}, { fetchImpl: async () => { called++; return ok({ ID: 'x' }); } }),
     /нет ИНН/
   );
   assert.equal(called, 0, 'зря в API не ходим');
@@ -94,7 +96,7 @@ test('без ИНН компанию не отправляем: Аргус её 
 
 test('превышение лимита 60/мин — один повтор, а не падение', async () => {
   let calls = 0;
-  const id = await createCompany(COMPANY, {
+  const id = await createCompany(COMPANY, {}, {
     fetchImpl: async () => {
       calls++;
       return calls === 1
@@ -108,21 +110,21 @@ test('превышение лимита 60/мин — один повтор, а 
 
 test('ошибка Аргуса разворачивается в понятный текст', async () => {
   await assert.rejects(
-    () => createCompany(COMPANY, { fetchImpl: async () => fail('BAD_REQUEST', 'OKED неизвестен') }),
+    () => createCompany(COMPANY, {}, { fetchImpl: async () => fail('BAD_REQUEST', 'OKED неизвестен') }),
     /Аргус companies\.add: OKED неизвестен/
   );
 });
 
 test('ответ без ID считается ошибкой, а не успехом', async () => {
   await assert.rejects(
-    () => createCompany(COMPANY, { fetchImpl: async () => ok(null) }),
+    () => createCompany(COMPANY, {}, { fetchImpl: async () => ok(null) }),
     /не вернул ID/
   );
 });
 
 test('ensureCompany берёт существующую компанию вместо дубля', async () => {
   let added = 0;
-  const res = await ensureCompany(COMPANY, {
+  const res = await ensureCompany(COMPANY, {}, {
     fetchImpl: async (url) => {
       if (url.includes('companies.add')) { added++; return ok({ ID: 'new' }); }
       return ok(LIST);
@@ -133,7 +135,7 @@ test('ensureCompany берёт существующую компанию вме�
 });
 
 test('ensureCompany заводит новую, если ИНН не нашёлся', async () => {
-  const res = await ensureCompany({ ...COMPANY, inn: '777777777' }, {
+  const res = await ensureCompany({ ...COMPANY, inn: '777777777' }, { assignedById: 'user-3', kind: 'lead' }, {
     fetchImpl: async (url) => (url.includes('companies.add') ? ok({ ID: 'fresh' }) : ok(LIST)),
   });
   assert.deepEqual(res, { id: 'fresh', created: true });

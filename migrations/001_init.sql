@@ -1,10 +1,12 @@
 -- Контур распределения лидов. Схема v2: назначение на команду, две независимые очереди.
 
 CREATE TABLE IF NOT EXISTS teams (
-  id          INTEGER PRIMARY KEY,
-  name        TEXT NOT NULL UNIQUE,
-  queue_order INTEGER NOT NULL DEFAULT 0,   -- место в очереди по умолчанию: 1,2,3,4
-  active      INTEGER NOT NULL DEFAULT 1,
+  id            INTEGER PRIMARY KEY,
+  name          TEXT NOT NULL UNIQUE,
+  queue_order   INTEGER NOT NULL DEFAULT 0, -- место в очереди по умолчанию: 1,2,3,4
+  -- id ответственного в Аргусе: с ним компания заводится на команду
+  argus_user_id TEXT,
+  active        INTEGER NOT NULL DEFAULT 1,
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -42,11 +44,16 @@ CREATE TABLE IF NOT EXISTS leads (
   dedup_key      TEXT,
   source_status  TEXT,                      -- что сейчас написано в колонке «статус» шита
   b24_company_id TEXT,                      -- id компании в Б24 из таблицы
+  b24_snapshot   TEXT,                      -- карточка из Б24 целиком, чтобы не дёргать его дважды
   argus_company_id TEXT,                    -- id компании в Аргусе после создания
   -- pending (нужно подтянуть из Б24) | ready | failed
   enrich_state   TEXT NOT NULL DEFAULT 'ready',
   enrich_error   TEXT,
   enrich_attempts INTEGER NOT NULL DEFAULT 0,
+  -- доставка в Аргус: idle | pending (назначено, ждём отправки) | sent | failed
+  argus_state    TEXT NOT NULL DEFAULT 'idle',
+  argus_error    TEXT,
+  argus_attempts INTEGER NOT NULL DEFAULT 0,
   -- new | assigned | in_work | rejected (фрод) | escalated | quarantine
   status         TEXT NOT NULL DEFAULT 'new',
   assigned_team  INTEGER REFERENCES teams(id),
@@ -59,6 +66,7 @@ CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
 CREATE INDEX IF NOT EXISTS idx_leads_kind   ON leads(kind, status);
 CREATE INDEX IF NOT EXISTS idx_leads_dedup  ON leads(dedup_key);
 CREATE INDEX IF NOT EXISTS idx_leads_enrich ON leads(enrich_state, status);
+CREATE INDEX IF NOT EXISTS idx_leads_argus  ON leads(argus_state);
 
 -- Журнал назначений: кому отдали и чем закончилось.
 CREATE TABLE IF NOT EXISTS assignments (

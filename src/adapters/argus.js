@@ -2,7 +2,31 @@
 // Диспетчер устроен как у Б24: адрес несёт личность и права,
 // тело оборачивается в fields/filter, ответ приходит конвертом.
 //   ARGUS_API_URL=https://crm-mvp.cloudplus.uz/api/rest/v1/<userPublicId>/<token>
+import { readFileSync, existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const RATE_LIMIT_PAUSE_MS = 2000;   // потолок 60 запросов в минуту на ключ
+
+const DEFAULT_FIELDS = {
+  fields: { assignedBy: 'ASSIGNED_BY_ID', kind: 'LEAD_TYPE' },
+  kindValues: { lead: 'Лид', meeting: 'Встреча' },
+};
+
+let fieldConfig = null;
+/** Имена полей Аргуса — из config/argus.json, чтобы переименование не лезло в код. */
+export function argusFields() {
+  if (fieldConfig) return fieldConfig;
+  const path = process.env.ARGUS_FIELDS_CONFIG || join(ROOT, 'config', 'argus.json');
+  const raw = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
+  fieldConfig = {
+    fields: { ...DEFAULT_FIELDS.fields, ...(raw.fields || {}) },
+    kindValues: { ...DEFAULT_FIELDS.kindValues, ...(raw.kindValues || {}) },
+  };
+  return fieldConfig;
+}
+export const setArgusFields = (cfg) => { fieldConfig = cfg ? { ...DEFAULT_FIELDS, ...cfg } : null; };
 
 const base = () => {
   const url = process.env.ARGUS_API_URL;
@@ -48,11 +72,12 @@ export async function findCompanyByInn(inn, opts = {}) {
 }
 
 /**
- * Завести компанию. Поля — как в Аргусе: TITLE и INN обязательны,
- * ORGINFO/OKED/CONTACT_* заполняем из карточки Б24.
+ * Завести компанию сразу на ответственного команды.
+ * TITLE и INN обязательны, ORGINFO/OKED/CONTACT_* — из карточки Б24.
  * @param {object} company карточка из adapters/bitrix.js
+ * @param {{assignedById?: string, kind?: 'lead'|'meeting'}} placement кому и с каким типом
  */
-export async function createCompany(company, opts = {}) {
+export async function createCompany(company, placement = {}, opts = {}) {
   if (!company.title) throw new Error('в карточке Б24 нет названия компании (TITLE)');
   if (!company.inn) throw new Error('в карточке Б24 нет ИНН — Аргус без него компанию не заведёт');
 
@@ -77,15 +102,19 @@ export async function createCompany(company, opts = {}) {
     CONTACT_EMAIL: contact?.email || contact?.emails?.[0] || undefined,
   };
 
+  const { fields: names, kindValues } = argusFields();
+  if (placement.assignedById) fields[names.assignedBy] = placement.assignedById;
+  if (placement.kind && kindValues[placement.kind]) fields[names.kind] = kindValues[placement.kind];
+
   const result = await call('companies.add', { fields }, opts);
   const id = result?.ID ?? result?.id ?? (typeof result === 'string' ? result : null);
   if (!id) throw new Error('Аргус companies.add не вернул ID компании');
   return String(id);
 }
 
-/** Есть — берём существующую, нет — заводим. */
-export async function ensureCompany(company, opts = {}) {
+/** Есть — берём существующую, нет — заводим на ответственного команды. */
+export async function ensureCompany(company, placement = {}, opts = {}) {
   const existing = await findCompanyByInn(company.inn, opts);
   if (existing) return { id: existing, created: false };
-  return { id: await createCompany(company, opts), created: true };
+  return { id: await createCompany(company, placement, opts), created: true };
 }

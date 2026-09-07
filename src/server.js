@@ -10,6 +10,7 @@ import { flushOutbox } from './core/webhooks.js';
 import { flushSheetWrites } from './core/sheetWriter.js';
 import { getConfig } from './core/columns.js';
 import { enrichPending } from './core/enrichment.js';
+import { deliverPending } from './core/argusDelivery.js';
 
 loadEnv();
 
@@ -49,6 +50,11 @@ every(30_000, async () => {
   }
   const { assigned } = dispatchQueue(db);
   if (assigned) log(`распределено: ${assigned}`);
+
+  if (process.env.ARGUS_API_URL) {
+    const delivered = await deliverPending(db);
+    if (delivered.picked) log('в Аргус', JSON.stringify(delivered));
+  }
 });
 
 every(10_000, async () => {

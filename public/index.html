@@ -44,6 +44,7 @@
   <div class="spacer"></div>
   <button class="ghost" onclick="api('/api/import','POST').then(load)">Опросить таблицу</button>
   <button class="act" onclick="api('/api/dispatch','POST').then(load)">Распределить пул</button>
+  <button class="ghost" onclick="api('/api/deliver','POST').then(load)">Отправить в Аргус</button>
   <button class="ghost" onclick="fetch('/api/logout').then(()=>location.href='/login.html')">Выйти</button>
 </header>
 <main id="view">загрузка…</main>
@@ -113,9 +114,12 @@ function renderQueues() {
 }
 
 function renderTeams() {
-  return `<table><tr><th>Порядок</th><th>Команда</th><th>Назначено сейчас</th><th>Взяли в работу</th><th>Фрод</th><th>Активна</th></tr>` +
+  return `<table><tr><th>Порядок</th><th>Команда</th><th>Ответственный в Аргусе</th><th>Назначено сейчас</th><th>Взяли в работу</th><th>Фрод</th><th>Активна</th></tr>` +
     (st.teams || []).map(t => `<tr>
       <td>${t.queue_order}</td><td>${esc(t.name)}</td>
+      <td><input value="${esc(t.argus_user_id || '')}" placeholder="id из Аргуса" style="width:200px"
+            onchange="api('/api/teams/${t.id}','PATCH',{argus_user_id:this.value||null}).then(load)">
+        ${t.argus_user_id ? '' : '<div class="dim">без него компания не уедет</div>'}</td>
       <td>${t.pending || 0}</td><td>${t.in_work || 0}</td><td>${t.declined || 0}</td>
       <td><input type="checkbox" ${t.active ? 'checked' : ''} onchange="api('/api/teams/${t.id}','PATCH',{active:this.checked?1:0}).then(load)"></td>
     </tr>`).join('') + `</table>
@@ -124,6 +128,9 @@ function renderTeams() {
     }</div>
     <h3>Пометки в таблице</h3><div class="cards">${
       Object.entries(st.sheet_writes || {}).map(([k, v]) => `<div class="card"><b>${v}</b><span>${k}</span></div>`).join('') || '<span class="dim">записей нет</span>'
+    }</div>
+    <h3>Компании в Аргусе</h3><div class="cards">${
+      Object.entries(st.argus || {}).map(([k, v]) => `<div class="card"><b>${v}</b><span>${k}</span></div>`).join('') || '<span class="dim">пока не отправляли</span>'
     }</div>`;
 }
 

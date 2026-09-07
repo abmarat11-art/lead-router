@@ -1,0 +1,13 @@
+{
+  "_comment": "Имена полей в Аргусе. Меняются здесь, без правки кода.",
+  "fields": {
+    "assignedBy": "ASSIGNED_BY_ID",
+    "kind": "LEAD_TYPE"
+  },
+
+  "_comment2": "Что писать в поле типа: лид или встреча.",
+  "kindValues": {
+    "lead": "Лид",
+    "meeting": "Встреча"
+  }
+}

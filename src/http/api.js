@@ -81,6 +81,11 @@ export function createHandler(db, { importNow } = {}) {
         return json(res, 200, await enrichPending(db));
       }
 
+      if (req.method === 'POST' && p === '/api/deliver') {
+        const { deliverPending } = await import('../core/argusDelivery.js');
+        return json(res, 200, await deliverPending(db));
+      }
+
       if (req.method === 'POST' && p === '/api/import') {
         if (!importNow) return json(res, 501, { error: 'источник не настроен' });
         return json(res, 200, await importNow());
@@ -121,7 +126,8 @@ export function createHandler(db, { importNow } = {}) {
       if (req.method === 'POST' && p === '/api/teams') {
         const b = await readJson(req);
         const order = b.queue_order ?? (activeTeams(db).length + 1);
-        const info = db.prepare('INSERT INTO teams (name, queue_order) VALUES (?, ?)').run(b.name, order);
+        const info = db.prepare('INSERT INTO teams (name, queue_order, argus_user_id) VALUES (?, ?, ?)')
+          .run(b.name, order, b.argus_user_id ?? null);
         return json(res, 200, { id: Number(info.lastInsertRowid) });
       }
 
@@ -130,7 +136,7 @@ export function createHandler(db, { importNow } = {}) {
         const fields = [];
         const values = [];
         for (const [k, v] of Object.entries(b)) {
-          if (!['name', 'queue_order', 'active'].includes(k)) continue;
+          if (!['name', 'queue_order', 'active', 'argus_user_id'].includes(k)) continue;
           fields.push(`${k} = ?`);
           values.push(v);
         }
@@ -174,7 +180,7 @@ export function stats(db) {
     db.prepare("SELECT kind, COUNT(*) c FROM leads WHERE kind IS NOT NULL GROUP BY kind").all().map((r) => [r.kind, r.c])
   );
   const byTeam = db.prepare(`
-    SELECT t.id, t.name, t.queue_order, t.active,
+    SELECT t.id, t.name, t.queue_order, t.active, t.argus_user_id,
       SUM(CASE WHEN a.state = 'pending'  THEN 1 ELSE 0 END) pending,
       SUM(CASE WHEN a.state = 'in_work'  THEN 1 ELSE 0 END) in_work,
       SUM(CASE WHEN a.state = 'declined' THEN 1 ELSE 0 END) declined,
@@ -187,5 +193,9 @@ export function stats(db) {
   const sheet = Object.fromEntries(
     db.prepare('SELECT state, COUNT(*) c FROM sheet_writes GROUP BY state').all().map((r) => [r.state, r.c])
   );
-  return { leads: byStatus, kinds: byKind, teams: byTeam, outbox, sheet_writes: sheet };
+  const argus = Object.fromEntries(
+    db.prepare("SELECT argus_state, COUNT(*) c FROM leads WHERE argus_state != 'idle' GROUP BY argus_state")
+      .all().map((r) => [r.argus_state, r.c])
+  );
+  return { leads: byStatus, kinds: byKind, teams: byTeam, outbox, sheet_writes: sheet, argus };
 }
