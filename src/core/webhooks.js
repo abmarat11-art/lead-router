@@ -5,14 +5,12 @@ import { createHmac, randomUUID } from 'node:crypto';
 const BACKOFF_SEC = [0, 30, 120, 600, 3600];
 const nowIso = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 
-export function enqueueWebhook(db, event, leadId, employeeId = null, extra = {}) {
+export function enqueueWebhook(db, event, leadId, teamId = null, extra = {}) {
   const url = process.env.ARGUS_WEBHOOK_URL;
   if (!url) return null; // вебхуки ещё не настроены — молча копим только в events
 
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
-  const employee = employeeId
-    ? db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId)
-    : null;
+  const team = teamId ? db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId) : null;
 
   const payload = {
     id: randomUUID(),
@@ -26,18 +24,12 @@ export function enqueueWebhook(db, event, leadId, employeeId = null, extra = {})
       phone: lead.phone,
       email: lead.email,
       lead_gen: lead.lead_gen,
-      outcome_type: lead.outcome_type,
-      lang: lead.lang,
+      kind: lead.kind,
       region: lead.region,
       status: lead.status,
       raw: JSON.parse(lead.raw || '{}'),
     },
-    employee: employee && {
-      id: employee.id,
-      name: employee.name,
-      tg_user_id: employee.tg_user_id,
-      team_id: employee.team_id,
-    },
+    team: team && { id: team.id, name: team.name, queue_order: team.queue_order },
     ...extra,
   };
 

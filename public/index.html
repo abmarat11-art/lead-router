@@ -8,8 +8,9 @@
   :root { --bg:#0f1115; --card:#171a21; --line:#252a35; --text:#e6e9ef; --dim:#9aa3b2; --acc:#4f8cff; --ok:#3ecf8e; --warn:#f5a524; --bad:#f45b69; }
   * { box-sizing: border-box; }
   body { margin:0; font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); }
-  header { display:flex; gap:8px; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); }
+  header { display:flex; gap:8px; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:2; }
   h1 { font-size:16px; margin:0 16px 0 0; }
+  h3 { margin:20px 0 8px; font-size:14px; }
   nav button { background:none; border:0; color:var(--dim); padding:6px 10px; border-radius:6px; cursor:pointer; font:inherit; }
   nav button.on { background:var(--card); color:var(--text); }
   .spacer { flex:1 }
@@ -21,16 +22,19 @@
   th { color:var(--dim); font-weight:500; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
   tr:last-child td { border-bottom:0; }
   .tag { display:inline-block; padding:1px 7px; border-radius:20px; font-size:12px; background:#232833; color:var(--dim); }
-  .tag.new,.tag.queued { background:#1d2b45; color:#8ab4ff }
-  .tag.offered { background:#3a2f14; color:var(--warn) }
-  .tag.assigned { background:#14321f; color:var(--ok) }
+  .tag.new { background:#1d2b45; color:#8ab4ff }
+  .tag.assigned { background:#3a2f14; color:var(--warn) }
+  .tag.in_work { background:#14321f; color:var(--ok) }
   .tag.escalated,.tag.quarantine { background:#3a1a1f; color:var(--bad) }
   .cards { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 16px; min-width:120px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 16px; min-width:110px; }
   .card b { display:block; font-size:22px; }
   .card span { color:var(--dim); font-size:12px; }
   .dim { color:var(--dim); font-size:12px; }
-  select,input { background:#0d0f14; border:1px solid var(--line); color:var(--text); border-radius:6px; padding:4px 8px; font:inherit; }
+  .chain { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .chip { background:#232833; border:1px solid var(--line); border-radius:20px; padding:3px 10px; }
+  .chip.prio { background:#3a2f14; color:var(--warn); border-color:#4a3a18; }
+  select { background:#0d0f14; border:1px solid var(--line); color:var(--text); border-radius:6px; padding:4px 8px; font:inherit; }
 </style>
 </head>
 <body>
@@ -38,28 +42,24 @@
   <h1>Контур лидов</h1>
   <nav id="nav"></nav>
   <div class="spacer"></div>
-  <button class="ghost" onclick="api('/api/import','POST').then(load)">Импорт сейчас</button>
+  <button class="ghost" onclick="api('/api/import','POST').then(load)">Опросить таблицу</button>
   <button class="act" onclick="api('/api/dispatch','POST').then(load)">Распределить пул</button>
 </header>
 <main id="view">загрузка…</main>
 <script>
-const TABS = [['pool','Пул'],['offered','Предложены'],['assigned','В работе'],['quarantine','Карантин'],['escalated','Эскалация'],['teams','Команды'],['monitor','Мониторинг']];
-let tab = 'pool', teams = [], data = [], st = {};
+const TABS = [['new','Пул'],['assigned','Назначены'],['in_work','В работе'],['quarantine','Карантин'],['escalated','Эскалация'],['queues','Очереди'],['teams','Команды']];
+const KIND_RU = { lead: 'лид', meeting: 'встреча' };
+let tab = 'new', teams = [], queues = [], data = [], st = {};
 
 const api = (url, method = 'GET', body) =>
   fetch(url, { method, headers: { 'content-type': 'application/json' }, body: body && JSON.stringify(body) }).then(r => r.json());
 
 const esc = (s) => String(s ?? '').replace(/[<>&]/g, c => ({ '<':'&lt;','>':'&gt;','&':'&amp;' }[c]));
+const teamName = (id) => teams.find(t => t.id === id)?.name || id;
 
 async function load() {
-  st = await api('/api/stats');
-  teams = await api('/api/teams');
-  if (tab === 'teams' || tab === 'monitor') data = [];
-  else {
-    const q = tab === 'pool' ? '' : '?status=' + tab;
-    data = await api('/api/leads' + q);
-    if (tab === 'pool') data = data.filter(l => ['new','queued'].includes(l.status));
-  }
+  [st, teams, queues] = await Promise.all([api('/api/stats'), api('/api/teams'), api('/api/queues')]);
+  data = ['teams', 'queues'].includes(tab) ? [] : await api('/api/leads?status=' + tab);
   render();
 }
 
@@ -67,7 +67,7 @@ function render() {
   document.getElementById('nav').innerHTML = TABS.map(([k, t]) =>
     `<button class="${k === tab ? 'on' : ''}" onclick="tab='${k}';load()">${t}</button>`).join('');
   document.getElementById('view').innerHTML =
-    tab === 'teams' ? renderTeams() : tab === 'monitor' ? renderMonitor() : renderLeads();
+    tab === 'teams' ? renderTeams() : tab === 'queues' ? renderQueues() : renderLeads();
 }
 
 const counters = () => `<div class="cards">${
@@ -76,42 +76,52 @@ const counters = () => `<div class="cards">${
 
 function renderLeads() {
   if (!data.length) return counters() + '<p class="dim">Пусто.</p>';
-  const opts = teams.flatMap(t => t.members.map(m => `<option value="${m.id}">${esc(m.name)}</option>`)).join('');
+  const opts = teams.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
   return counters() + `<table><tr>
-      <th>Компания</th><th>Контакт</th><th>Язык</th><th>Итог</th><th>Лидген</th><th>Статус</th><th>Кому</th><th></th></tr>` +
+      <th>Компания</th><th>Контакт</th><th>Вид</th><th>Лидген</th><th>Статус</th><th>Команда</th><th></th></tr>` +
     data.map(l => `<tr>
       <td>${esc(l.company)}<div class="dim">${esc(l.source_key)}</div></td>
       <td>${esc(l.contact_name)}<div class="dim">${esc(l.phone || l.email)}</div></td>
-      <td>${esc(l.lang)}</td><td>${esc(l.outcome_type)}</td><td>${esc(l.lead_gen)}</td>
-      <td><span class="tag ${l.status}">${l.status}</span>${l.quarantine_reason ? `<div class="dim">${esc(l.quarantine_reason)}</div>` : ''}${l.decline_count ? `<div class="dim">отказов: ${l.decline_count}</div>` : ''}</td>
-      <td>${l.offer ? esc(l.offer.employee_name) + '<div class="dim">до ' + esc(l.offer.expires_at) + '</div>' : esc(l.assigned_to ? nameOf(l.assigned_to) : '')}</td>
+      <td>${esc(KIND_RU[l.kind] || l.kind || '—')}</td>
+      <td>${esc(l.lead_gen)}</td>
+      <td><span class="tag ${l.status}">${l.status}</span>
+        ${l.quarantine_reason ? `<div class="dim">${esc(l.quarantine_reason)}</div>` : ''}
+        ${l.decline_count ? `<div class="dim">отказов: ${l.decline_count}</div>` : ''}</td>
+      <td>${esc(l.team_name || '—')}
+        ${l.assignments.length > 1 ? `<div class="dim">${l.assignments.map(a => esc(a.team_name) + ' — ' + a.state).join(', ')}</div>` : ''}</td>
       <td>
-        ${l.status === 'quarantine' ? `<button class="ghost" onclick="act(${l.id},'release')">В работу</button>` : ''}
-        ${['new','queued','escalated'].includes(l.status) ? `<button class="ghost" onclick="act(${l.id},'offer')">Предложить</button>` : ''}
-        <select onchange="assign(${l.id}, this.value)"><option value="">назначить…</option>${opts}</select>
+        ${l.status === 'quarantine' ? `<button class="ghost" onclick="act(${l.id},'release')">В пул</button>` : ''}
+        ${['new','escalated'].includes(l.status) ? `<button class="ghost" onclick="act(${l.id},'assign')">Назначить по очереди</button>` : ''}
+        ${l.status === 'assigned' ? `<button class="ghost" onclick="act(${l.id},'in-work')">В работе</button>
+          <button class="ghost" onclick="act(${l.id},'decline')">Отказ</button>` : ''}
+        <select onchange="assignTo(${l.id}, this.value)"><option value="">команде…</option>${opts}</select>
       </td></tr>`).join('') + '</table>';
 }
 
-const nameOf = (id) => teams.flatMap(t => t.members).find(m => m.id === id)?.name || id;
 const act = (id, what) => api(`/api/leads/${id}/${what}`, 'POST').then(load);
-const assign = (id, employee_id) => employee_id && api(`/api/leads/${id}/assign`, 'POST', { employee_id: +employee_id }).then(load);
+const assignTo = (id, team_id) => team_id && api(`/api/leads/${id}/assign`, 'POST', { team_id: +team_id }).then(load);
 
-function renderTeams() {
-  return teams.map(t => `<h3>${esc(t.name)} <span class="dim">${t.strategy}</span></h3>
-    <table><tr><th>#</th><th>Сотрудник</th><th>Телеграм</th><th>Языки</th><th>Лимит/день</th><th>Активен</th></tr>` +
-    t.members.map(m => `<tr><td>${m.queue_order}</td><td>${esc(m.name)}</td>
-      <td>${esc(m.tg_username || '—')}${m.tg_user_id ? '' : '<div class="dim">не привязан</div>'}</td>
-      <td>${m.langs.join(', ') || '—'}</td><td>${m.daily_limit || '∞'}</td>
-      <td><input type="checkbox" ${m.active ? 'checked' : ''} onchange="api('/api/employees/${m.id}','PATCH',{active:this.checked?1:0}).then(load)"></td>
-    </tr>`).join('') + '</table>').join('') || '<p class="dim">Команд пока нет.</p>';
+function renderQueues() {
+  return queues.map(q => `<h3>Очередь: ${KIND_RU[q.kind] || q.kind}</h3>
+    <div class="chain">${q.preview.map(p =>
+      `<span class="chip ${p.via_priority ? 'prio' : ''}">${esc(teamName(p.team_id))}${p.via_priority ? ' ↑' : ''}</span>`).join('<span class="dim">→</span>')}</div>
+    <p class="dim">${q.priority.length
+      ? 'вне очереди после отказа: ' + q.priority.map(p => esc(p.team_name)).join(', ')
+      : 'внеочередников нет, идёт обычный круг'}</p>`).join('');
 }
 
-function renderMonitor() {
-  return counters() + `<table><tr><th>Сотрудник</th><th>Принял</th><th>Отказал</th><th>Просрочил</th><th>Ждёт ответа</th></tr>` +
-    (st.employees || []).map(e => `<tr><td>${esc(e.name)}</td><td>${e.accepted || 0}</td><td>${e.declined || 0}</td>
-      <td>${e.expired || 0}</td><td>${e.pending || 0}</td></tr>`).join('') +
-    `</table><h3>Вебхуки в Аргус</h3><div class="cards">${
+function renderTeams() {
+  return `<table><tr><th>Порядок</th><th>Команда</th><th>Назначено сейчас</th><th>Взяли в работу</th><th>Отказов</th><th>Активна</th></tr>` +
+    (st.teams || []).map(t => `<tr>
+      <td>${t.queue_order}</td><td>${esc(t.name)}</td>
+      <td>${t.pending || 0}</td><td>${t.in_work || 0}</td><td>${t.declined || 0}</td>
+      <td><input type="checkbox" ${t.active ? 'checked' : ''} onchange="api('/api/teams/${t.id}','PATCH',{active:this.checked?1:0}).then(load)"></td>
+    </tr>`).join('') + `</table>
+    <h3>Вебхуки в Аргус</h3><div class="cards">${
       Object.entries(st.outbox || {}).map(([k, v]) => `<div class="card"><b>${v}</b><span>${k}</span></div>`).join('') || '<span class="dim">очередь пуста</span>'
+    }</div>
+    <h3>Пометки в таблице</h3><div class="cards">${
+      Object.entries(st.sheet_writes || {}).map(([k, v]) => `<div class="card"><b>${v}</b><span>${k}</span></div>`).join('') || '<span class="dim">записей нет</span>'
     }</div>`;
 }
 

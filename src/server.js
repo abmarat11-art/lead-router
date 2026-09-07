@@ -1,11 +1,12 @@
-// Точка входа: HTTP + фоновые циклы (импорт, протухание предложений, отправка вебхуков).
+// Точка входа: HTTP + фоновые циклы (опрос таблицы, распределение, вебхуки, пометки в шит).
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { openMigrated } from './db/index.js';
 import { createHandler } from './http/api.js';
 import { importBatch } from './core/importer.js';
-import { expireOffers, dispatchQueue } from './core/router.js';
+import { dispatchQueue } from './core/queue.js';
 import { flushOutbox } from './core/webhooks.js';
+import { flushSheetWrites } from './core/sheetWriter.js';
 
 loadEnv();
 
@@ -14,10 +15,12 @@ const log = (...a) => console.log(new Date().toISOString(), ...a);
 
 async function importNow() {
   const { fetchBatch } = await import('./adapters/sheets.js');
-  const batch = await fetchBatch();
-  const stats = importBatch(db, batch, { defaultTeamId: Number(process.env.DEFAULT_TEAM_ID) || null });
-  log('import', JSON.stringify(stats));
-  return stats;
+  const stats = importBatch(db, await fetchBatch());
+  const dispatched = dispatchQueue(db);
+  if (stats.created || stats.in_work || stats.declined || dispatched.assigned) {
+    log('import', JSON.stringify(stats), 'dispatch', JSON.stringify(dispatched));
+  }
+  return { ...stats, ...dispatched };
 }
 
 const server = createServer(createHandler(db, { importNow }));
@@ -25,20 +28,24 @@ const port = Number(process.env.PORT) || 3000;
 server.listen(port, () => log(`lead-router на http://localhost:${port}`));
 
 // --- фоновые циклы ---
-every(Number(process.env.IMPORT_INTERVAL_MS) || 120_000, async () => {
+// опрос таблицы раз в минуту: новые строки в очередь, статусы из СРМ обратно к нам
+every(Number(process.env.IMPORT_INTERVAL_MS) || 60_000, async () => {
   if (!process.env.SHEETS_SPREADSHEET_ID) return;
   await importNow();
 });
 
 every(30_000, () => {
-  const expired = expireOffers(db);
-  const { offered } = dispatchQueue(db);
-  if (expired || offered) log(`tick: протухло ${expired}, предложено ${offered}`);
+  const { assigned } = dispatchQueue(db);
+  if (assigned) log(`распределено: ${assigned}`);
 });
 
 every(10_000, async () => {
-  const res = await flushOutbox(db);
-  if (res.picked) log('outbox', JSON.stringify(res));
+  const out = await flushOutbox(db);
+  if (out.picked) log('outbox', JSON.stringify(out));
+  if (process.env.SHEETS_STATUS_COLUMN) {
+    const sheet = await flushSheetWrites(db);
+    if (sheet.picked) log('sheet', JSON.stringify(sheet));
+  }
 });
 
 function every(ms, fn) {

@@ -45,16 +45,17 @@ export function toBatch(values, sheetName = 'sheet') {
   return { headers, rows };
 }
 
-// Обратная запись в шит: кому ушёл лид и когда. Лидген видит судьбу своей строки.
-export async function writeBackAssignment({
+// Обратная запись в шит: ставим статус напротив компании в её же строке.
+export async function writeBackStatus({
   spreadsheetId = process.env.SHEETS_SPREADSHEET_ID,
   sourceKey,
-  column = process.env.SHEETS_WRITEBACK_COLUMN,
+  column = process.env.SHEETS_STATUS_COLUMN,
   value,
 }) {
-  if (!column || !spreadsheetId) return false;
-  const rowNumber = sourceKey.split(':').pop();
-  const sheetName = sourceKey.split(':').slice(0, -1).join(':');
+  if (!column || !spreadsheetId) throw new Error('SHEETS_STATUS_COLUMN или SHEETS_SPREADSHEET_ID не задан');
+  const parts = String(sourceKey).split(':');
+  const rowNumber = parts.pop();
+  const sheetName = parts.join(':');
   const range = `${sheetName}!${column}${rowNumber}`;
   await api(`${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`, {
     method: 'PUT',

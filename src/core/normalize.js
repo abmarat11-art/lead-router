@@ -9,7 +9,7 @@ export const COLUMN_SYNONYMS = {
   email:        ['почта', 'email', 'e-mail'],
   lead_gen:     ['лидогенератор', 'лидген', 'ответственный', 'кто нашёл', 'кто нашел', 'менеджер'],
   outcome_type: ['итог', 'результат', 'тип', 'итог работы', 'outcome'],
-  lang:         ['язык', 'язык клиента', 'lang', 'language'],
+  status:       ['статус', 'status', 'состояние'],
   region:       ['регион', 'город', 'область', 'region'],
   comment:      ['комментарий', 'примечание', 'заметка', 'comment'],
 };
@@ -39,27 +39,23 @@ export function normalizePhone(raw) {
   return `+${digits}`;
 }
 
-const LANGS = {
-  ru: ['ru', 'рус', 'русский', 'russian'],
-  uz: ['uz', 'узб', 'узбекский', 'uzbek', 'ozbek'],
-  en: ['en', 'англ', 'английский', 'english'],
-};
-
-export function normalizeLang(raw) {
-  const v = norm(raw);
-  if (!v) return null;
-  for (const [code, variants] of Object.entries(LANGS)) {
-    if (variants.some((x) => v.startsWith(x))) return code;
-  }
-  return v.slice(0, 8);
-}
-
-export function normalizeOutcome(raw) {
+// Итог работы лидгена задаёт очередь: лиды и встречи распределяются независимо.
+export function normalizeKind(raw) {
   const v = norm(raw);
   if (!v) return null;
   if (v.includes('встреч') || v.includes('meeting')) return 'meeting';
   if (v.includes('лид') || v.includes('lead')) return 'lead';
-  return v.slice(0, 32);
+  return null;
+}
+
+// Что СРМ написала в колонке статуса. Пустой статус = строку ещё не распределяли.
+export function normalizeStatus(raw) {
+  const v = norm(raw);
+  if (!v) return null;
+  if (v.includes('отказ') || v.includes('decline') || v.includes('reject')) return 'declined';
+  if (v.includes('в работ') || v.includes('in work') || v.includes('принят')) return 'in_work';
+  if (v.includes('назнач') || v.includes('assigned')) return 'assigned';
+  return 'other';
 }
 
 export function rowHash(cells) {
@@ -78,8 +74,8 @@ export function normalizeRow(cells, headerMap, headers) {
     phone: normalizePhone(at('phone')),
     email: (at('email') || '').trim().toLowerCase() || null,
     lead_gen: (at('lead_gen') || '').trim() || null,
-    outcome_type: normalizeOutcome(at('outcome_type')),
-    lang: normalizeLang(at('lang')),
+    kind: normalizeKind(at('outcome_type')),
+    source_status: (at('status') || '').trim() || null,
     region: (at('region') || '').trim() || null,
     raw,
   };
@@ -90,7 +86,7 @@ export function normalizeRow(cells, headerMap, headers) {
   const problems = [];
   if (!lead.company && !lead.contact_name) problems.push('нет ни компании, ни контакта');
   if (!lead.phone && !lead.email) problems.push('нет телефона и почты');
-  if (!lead.outcome_type) problems.push('не указан итог работы');
+  if (!lead.kind) problems.push('не указан итог работы (лид или встреча)');
 
   return { lead, problems };
 }

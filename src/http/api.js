@@ -3,8 +3,9 @@ import { readFile } from 'node:fs/promises';
 import { join, dirname, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  offerLead, acceptOffer, declineOffer, dispatchQueue, assignManually, escalate,
-} from '../core/router.js';
+  assignNext, dispatchQueue, assignManually, escalate, markInWork, markDeclined,
+  queuePreview, activeTeams, KINDS,
+} from '../core/queue.js';
 import { releaseFromQuarantine, importBatch } from '../core/importer.js';
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
@@ -33,27 +34,36 @@ export function createHandler(db, { importNow } = {}) {
       // ---- чтение ----
       if (req.method === 'GET' && p === '/api/leads') {
         const status = url.searchParams.get('status');
-        const rows = status
-          ? db.prepare('SELECT * FROM leads WHERE status = ? ORDER BY imported_at DESC LIMIT 500').all(status)
-          : db.prepare('SELECT * FROM leads ORDER BY imported_at DESC LIMIT 500').all();
-        return json(res, 200, rows.map(withOffer(db)));
+        const kind = url.searchParams.get('kind');
+        const where = [];
+        const args = [];
+        if (status) { where.push('status = ?'); args.push(status); }
+        if (kind) { where.push('kind = ?'); args.push(kind); }
+        const rows = db.prepare(
+          `SELECT * FROM leads ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY imported_at DESC, id DESC LIMIT 500`
+        ).all(...args);
+        return json(res, 200, rows.map(decorate(db)));
       }
 
       if (req.method === 'GET' && p === '/api/teams') {
-        const teams = db.prepare('SELECT * FROM teams ORDER BY id').all();
-        return json(res, 200, teams.map((t) => ({
-          ...t,
-          members: db.prepare('SELECT * FROM employees WHERE team_id = ? ORDER BY queue_order, id').all(t.id)
-            .map((e) => ({ ...e, langs: JSON.parse(e.langs || '[]') })),
+        return json(res, 200, db.prepare('SELECT * FROM teams ORDER BY queue_order, id').all());
+      }
+
+      if (req.method === 'GET' && p === '/api/queues') {
+        return json(res, 200, KINDS.map((kind) => ({
+          kind,
+          cursor: db.prepare('SELECT cursor FROM queue_state WHERE kind = ?').get(kind)?.cursor ?? 0,
+          priority: db.prepare(
+            'SELECT p.*, t.name team_name FROM queue_priority p JOIN teams t ON t.id = p.team_id WHERE p.kind = ? AND p.consumed_at IS NULL ORDER BY p.id'
+          ).all(kind),
+          preview: queuePreview(db, kind, 8),
         })));
       }
 
       if (req.method === 'GET' && p === '/api/stats') return json(res, 200, stats(db));
 
       if (req.method === 'GET' && p === '/api/events') {
-        return json(res, 200, db.prepare(
-          'SELECT * FROM events ORDER BY id DESC LIMIT 200'
-        ).all());
+        return json(res, 200, db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT 200').all());
       }
 
       if (req.method === 'GET' && p === '/api/outbox') {
@@ -71,58 +81,46 @@ export function createHandler(db, { importNow } = {}) {
       }
 
       if (req.method === 'POST' && p === '/api/import/rows') {
-        const body = await readJson(req); // { headers, rows } — ручная загрузка/тесты
-        return json(res, 200, importBatch(db, body, { defaultTeamId: body.team_id ?? null }));
+        const body = await readJson(req); // ручная заливка строк / тесты
+        return json(res, 200, importBatch(db, body));
       }
 
       if (req.method === 'POST' && seg[1] === 'leads' && seg[3]) {
         const id = Number(seg[2]);
         const body = await readJson(req);
         switch (seg[3]) {
-          case 'offer':   return json(res, 200, offerLead(db, id) || { escalated: true });
-          case 'assign':  assignManually(db, id, Number(body.employee_id)); return json(res, 200, { ok: true });
-          case 'release': releaseFromQuarantine(db, id); return json(res, 200, { ok: true });
+          case 'assign':
+            return json(res, 200, body.team_id
+              ? assignManually(db, id, Number(body.team_id))
+              : assignNext(db, id) || { escalated: true });
+          case 'in-work':  return json(res, 200, markInWork(db, id));
+          case 'decline':  return json(res, 200, markDeclined(db, id, body.reason || 'отказ вручную'));
+          case 'release':  releaseFromQuarantine(db, id); return json(res, 200, { ok: true });
           case 'escalate': escalate(db, id, body.reason || 'вручную'); return json(res, 200, { ok: true });
-          case 'team':
-            db.prepare('UPDATE leads SET team_id = ? WHERE id = ?').run(Number(body.team_id), id);
+          case 'kind':
+            db.prepare('UPDATE leads SET kind = ? WHERE id = ?').run(body.kind, id);
             return json(res, 200, { ok: true });
         }
       }
 
-      if (req.method === 'POST' && seg[1] === 'offers' && seg[3]) {
-        const id = Number(seg[2]);
-        const body = await readJson(req);
-        if (seg[3] === 'accept') return json(res, 200, acceptOffer(db, id));
-        if (seg[3] === 'decline') return json(res, 200, declineOffer(db, id, body.reason || null));
-      }
-
-      // ---- справочники ----
+      // ---- команды ----
       if (req.method === 'POST' && p === '/api/teams') {
         const b = await readJson(req);
-        const info = db.prepare('INSERT INTO teams (name, strategy) VALUES (?, ?)')
-          .run(b.name, b.strategy || 'round_robin');
+        const order = b.queue_order ?? (activeTeams(db).length + 1);
+        const info = db.prepare('INSERT INTO teams (name, queue_order) VALUES (?, ?)').run(b.name, order);
         return json(res, 200, { id: Number(info.lastInsertRowid) });
       }
 
-      if (req.method === 'POST' && p === '/api/employees') {
-        const b = await readJson(req);
-        const info = db.prepare(
-          'INSERT INTO employees (team_id, name, tg_username, langs, daily_limit, queue_order) VALUES (?, ?, ?, ?, ?, ?)'
-        ).run(b.team_id ?? null, b.name, b.tg_username ?? null,
-              JSON.stringify(b.langs || []), b.daily_limit ?? 0, b.queue_order ?? 0);
-        return json(res, 200, { id: Number(info.lastInsertRowid) });
-      }
-
-      if (req.method === 'PATCH' && seg[1] === 'employees' && seg[2]) {
+      if (req.method === 'PATCH' && seg[1] === 'teams' && seg[2]) {
         const b = await readJson(req);
         const fields = [];
         const values = [];
         for (const [k, v] of Object.entries(b)) {
-          if (!['name', 'team_id', 'tg_username', 'tg_user_id', 'langs', 'daily_limit', 'queue_order', 'active'].includes(k)) continue;
+          if (!['name', 'queue_order', 'active'].includes(k)) continue;
           fields.push(`${k} = ?`);
-          values.push(k === 'langs' ? JSON.stringify(v) : v);
+          values.push(v);
         }
-        if (fields.length) db.prepare(`UPDATE employees SET ${fields.join(', ')} WHERE id = ?`).run(...values, Number(seg[2]));
+        if (fields.length) db.prepare(`UPDATE teams SET ${fields.join(', ')} WHERE id = ?`).run(...values, Number(seg[2]));
         return json(res, 200, { ok: true });
       }
 
@@ -143,28 +141,37 @@ export function createHandler(db, { importNow } = {}) {
   };
 }
 
-const withOffer = (db) => (lead) => ({
+const decorate = (db) => (lead) => ({
   ...lead,
   raw: JSON.parse(lead.raw || '{}'),
-  offer: db.prepare(
-    "SELECT o.*, e.name employee_name FROM offers o JOIN employees e ON e.id = o.employee_id WHERE o.lead_id = ? AND o.state = 'pending'"
-  ).get(lead.id) || null,
+  team_name: lead.assigned_team
+    ? db.prepare('SELECT name FROM teams WHERE id = ?').get(lead.assigned_team)?.name ?? null
+    : null,
+  assignments: db.prepare(
+    'SELECT a.*, t.name team_name FROM assignments a JOIN teams t ON t.id = a.team_id WHERE a.lead_id = ? ORDER BY a.id'
+  ).all(lead.id),
 });
 
 export function stats(db) {
   const byStatus = Object.fromEntries(
     db.prepare('SELECT status, COUNT(*) c FROM leads GROUP BY status').all().map((r) => [r.status, r.c])
   );
-  const byEmployee = db.prepare(`
-    SELECT e.id, e.name,
-      SUM(CASE WHEN o.state = 'accepted' THEN 1 ELSE 0 END) accepted,
-      SUM(CASE WHEN o.state = 'declined' THEN 1 ELSE 0 END) declined,
-      SUM(CASE WHEN o.state = 'expired'  THEN 1 ELSE 0 END) expired,
-      SUM(CASE WHEN o.state = 'pending'  THEN 1 ELSE 0 END) pending
-    FROM employees e LEFT JOIN offers o ON o.employee_id = e.id
-    GROUP BY e.id ORDER BY e.queue_order, e.id`).all();
+  const byKind = Object.fromEntries(
+    db.prepare("SELECT kind, COUNT(*) c FROM leads WHERE kind IS NOT NULL GROUP BY kind").all().map((r) => [r.kind, r.c])
+  );
+  const byTeam = db.prepare(`
+    SELECT t.id, t.name, t.queue_order, t.active,
+      SUM(CASE WHEN a.state = 'pending'  THEN 1 ELSE 0 END) pending,
+      SUM(CASE WHEN a.state = 'in_work'  THEN 1 ELSE 0 END) in_work,
+      SUM(CASE WHEN a.state = 'declined' THEN 1 ELSE 0 END) declined,
+      COUNT(a.id) total
+    FROM teams t LEFT JOIN assignments a ON a.team_id = t.id
+    GROUP BY t.id ORDER BY t.queue_order, t.id`).all();
   const outbox = Object.fromEntries(
     db.prepare('SELECT state, COUNT(*) c FROM webhook_outbox GROUP BY state').all().map((r) => [r.state, r.c])
   );
-  return { leads: byStatus, employees: byEmployee, outbox };
+  const sheet = Object.fromEntries(
+    db.prepare('SELECT state, COUNT(*) c FROM sheet_writes GROUP BY state').all().map((r) => [r.state, r.c])
+  );
+  return { leads: byStatus, kinds: byKind, teams: byTeam, outbox, sheet_writes: sheet };
 }

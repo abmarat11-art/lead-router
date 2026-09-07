@@ -4,10 +4,14 @@ import { createServer } from 'node:http';
 import { openMigrated } from '../src/db/index.js';
 import { createHandler } from '../src/http/api.js';
 
-const HEADERS = ['Компания', 'Телефон', 'Язык клиента', 'Итог работы', 'Лидогенератор'];
+const HEADERS = ['Компания', 'Телефон', 'Лидогенератор', 'Итог работы', 'Статус'];
+const rows = (...list) => list.map((cells, i) => ({ key: `Лист1:${i + 2}`, cells }));
 
 async function withServer(fn) {
   const db = openMigrated(':memory:');
+  for (let i = 1; i <= 4; i++) {
+    db.prepare('INSERT INTO teams (id, name, queue_order) VALUES (?, ?, ?)').run(i, `Команда ${i}`, i);
+  }
   const server = createServer(createHandler(db, { importNow: async () => ({ stub: true }) }));
   await new Promise((r) => server.listen(0, r));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -24,44 +28,61 @@ test('health отвечает', () => withServer(async ({ call }) => {
   assert.deepEqual((await call('/health')).body, { ok: true });
 }));
 
-test('полный путь: команда -> сотрудник -> импорт -> распределение -> акцепт', () => withServer(async ({ call }) => {
-  const team = (await call('/api/teams', 'POST', { name: 'Команда А' })).body;
-  await call('/api/employees', 'POST', { team_id: team.id, name: 'Аня', langs: ['ru'], queue_order: 1 });
-
+test('заливка строк и распределение по кругу команд', () => withServer(async ({ call }) => {
   const imported = await call('/api/import/rows', 'POST', {
     headers: HEADERS,
-    rows: [{ key: 'Лист1:2', cells: ['ООО Ромашка', '901234567', 'рус', 'Лид', 'Бек'] }],
-    team_id: team.id,
+    rows: rows(
+      ['ООО Ромашка', '901234567', 'Аня', 'Лид', ''],
+      ['Chinor Group', '901234568', 'Аня', 'Лид', ''],
+      ['Delta Trade', '901234569', 'Бек', 'Назначена встреча', ''],
+    ),
   });
-  assert.equal(imported.body.created, 1);
+  assert.equal(imported.body.created, 3);
 
-  assert.equal((await call('/api/dispatch', 'POST')).body.offered, 1);
+  assert.deepEqual((await call('/api/dispatch', 'POST')).body, { seen: 3, assigned: 3 });
 
-  const [lead] = (await call('/api/leads?status=offered')).body;
-  assert.equal(lead.offer.employee_name, 'Аня');
-
-  assert.deepEqual((await call(`/api/offers/${lead.offer.id}/accept`, 'POST')).body, { ok: true });
-  assert.equal((await call('/api/stats')).body.leads.assigned, 1);
+  const leads = (await call('/api/leads?status=assigned')).body;
+  const byCompany = Object.fromEntries(leads.map((l) => [l.company, l.team_name]));
+  assert.equal(byCompany['ООО Ромашка'], 'Команда 1');
+  assert.equal(byCompany['Chinor Group'], 'Команда 2');
+  assert.equal(byCompany['Delta Trade'], 'Команда 1');   // встречи — своя очередь
 }));
 
-test('отказ возвращает лид в очередь', () => withServer(async ({ call }) => {
-  const team = (await call('/api/teams', 'POST', { name: 'А' })).body;
-  await call('/api/employees', 'POST', { team_id: team.id, name: 'Аня', langs: [], queue_order: 1 });
-  await call('/api/employees', 'POST', { team_id: team.id, name: 'Бек', langs: [], queue_order: 2 });
+test('отказ из СРМ через таблицу двигает очередь', () => withServer(async ({ call }) => {
   await call('/api/import/rows', 'POST', {
-    headers: HEADERS, team_id: team.id,
-    rows: [{ key: 'Лист1:2', cells: ['ООО Ромашка', '901234567', 'рус', 'Лид', 'Бек'] }],
+    headers: HEADERS, rows: rows(['ООО Ромашка', '901234567', 'Аня', 'Лид', '']),
   });
   await call('/api/dispatch', 'POST');
-  const [lead] = (await call('/api/leads?status=offered')).body;
-  await call(`/api/offers/${lead.offer.id}/decline`, 'POST', { reason: 'не мой язык' });
-  const [again] = (await call('/api/leads?status=offered')).body;
-  assert.notEqual(again.offer.employee_id, lead.offer.employee_id);
+
+  // СРМ переписала статус в таблице
+  await call('/api/import/rows', 'POST', {
+    headers: HEADERS, rows: rows(['ООО Ромашка', '901234567', 'Аня', 'Лид', 'Отказ']),
+  });
+
+  const [lead] = (await call('/api/leads?status=assigned')).body;
+  assert.equal(lead.team_name, 'Команда 2');
+
+  const queues = (await call('/api/queues')).body;
+  const leadQueue = queues.find((q) => q.kind === 'lead');
+  assert.equal(leadQueue.priority[0].team_name, 'Команда 1');
+  assert.equal(leadQueue.preview[0].team_id, 1);
+}));
+
+test('ручное назначение и отметка «в работе»', () => withServer(async ({ call }) => {
+  await call('/api/import/rows', 'POST', {
+    headers: HEADERS, rows: rows(['ООО Ромашка', '901234567', 'Аня', 'Лид', '']),
+  });
+  const [lead] = (await call('/api/leads?status=new')).body;
+  await call(`/api/leads/${lead.id}/assign`, 'POST', { team_id: 3 });
+  await call(`/api/leads/${lead.id}/in-work`, 'POST');
+  const stats = (await call('/api/stats')).body;
+  assert.equal(stats.leads.in_work, 1);
+  assert.equal(stats.teams.find((t) => t.id === 3).in_work, 1);
 }));
 
 test('карантин виден отдельно и возвращается в работу', () => withServer(async ({ call }) => {
   await call('/api/import/rows', 'POST', {
-    headers: HEADERS, rows: [{ key: 'Лист1:2', cells: ['', '', '', '', 'Бек'] }],
+    headers: HEADERS, rows: rows(['', '', 'Бек', '', '']),
   });
   const [bad] = (await call('/api/leads?status=quarantine')).body;
   assert.match(bad.quarantine_reason, /нет/);
@@ -69,3 +90,10 @@ test('карантин виден отдельно и возвращается �
   assert.equal((await call('/api/leads?status=new')).body.length, 1);
 }));
 
+test('команды: создание, порядок, отключение', () => withServer(async ({ call }) => {
+  const created = (await call('/api/teams', 'POST', { name: 'Команда 5' })).body;
+  await call(`/api/teams/${created.id}`, 'PATCH', { active: 0 });
+  const teams = (await call('/api/teams')).body;
+  assert.equal(teams.length, 5);
+  assert.equal(teams.find((t) => t.id === created.id).active, 0);
+}));
