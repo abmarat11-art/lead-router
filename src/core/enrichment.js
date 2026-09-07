@@ -2,8 +2,6 @@
 // По id из таблицы забираем карточку из Б24, создаём компанию с контактами в Аргусе,
 // запоминаем её id. Пока это не сделано, лид в очередь не идёт: команда должна
 // получить компанию, которая в СРМ уже существует.
-import { createHmac, randomUUID } from 'node:crypto';
-
 const nowIso = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 const MAX_ATTEMPTS = 5;
 
@@ -19,45 +17,9 @@ export function pending(db, limit = 20) {
   ).all(MAX_ATTEMPTS, limit);
 }
 
-// Создание компании в Аргусе — отдельный вебхук, синхронный: нам нужен id в ответе.
-async function createInArgus(company, { fetchImpl = fetch } = {}) {
-  const url = process.env.ARGUS_COMPANY_URL;
-  if (!url) throw new Error('ARGUS_COMPANY_URL не задан');
-
-  const body = JSON.stringify({
-    id: randomUUID(),
-    event: 'company.create',
-    occurred_at: new Date().toISOString(),
-    company: {
-      b24_id: company.b24_id,
-      title: company.title,
-      inn: company.inn,
-      orginfo_url: company.orginfo_url,
-      oked: company.oked,
-    },
-    contacts: company.contacts,
-  });
-
-  const secret = process.env.ARGUS_WEBHOOK_SECRET;
-  const res = await fetchImpl(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-lead-router-event': 'company.create',
-      ...(secret ? { 'x-lead-router-signature': createHmac('sha256', secret).update(body).digest('hex') } : {}),
-    },
-    body,
-  });
-  if (!res.ok) throw new Error(`Аргус company.create: HTTP ${res.status}`);
-
-  const data = await res.json().catch(() => ({}));
-  const id = data.company_id ?? data.id ?? data.result?.id ?? null;
-  if (!id) throw new Error('Аргус не вернул id созданной компании');
-  return String(id);
-}
-
 /**
- * Один проход: дотянуть карточки и завести компании.
+ * Один проход: дотянуть карточки из Б24 и завести компании в Аргусе.
+ * Компания с таким ИНН уже есть — берём её, второй раз не создаём.
  * @param {{fetchCompany?: Function, createCompany?: Function}} deps подменяются в тестах
  */
 export async function enrichPending(db, { limit = 20, fetchCompany, createCompany } = {}) {
@@ -65,7 +27,11 @@ export async function enrichPending(db, { limit = 20, fetchCompany, createCompan
   if (!rows.length) return { picked: 0, ready: 0, failed: 0 };
 
   const getCompany = fetchCompany || (await import('../adapters/bitrix.js')).fetchCompany;
-  const create = createCompany || createInArgus;
+  const create = createCompany || (async (company) => {
+    const { ensureCompany } = await import('../adapters/argus.js');
+    const { id, created } = await ensureCompany(company);
+    return { id, created };
+  });
 
   let ready = 0, failed = 0;
   for (const lead of rows) {
@@ -73,13 +39,17 @@ export async function enrichPending(db, { limit = 20, fetchCompany, createCompan
     try {
       if (!lead.b24_company_id) throw new Error('в строке нет id компании Б24');
       const company = await getCompany(lead.b24_company_id);
-      const argusId = await create(company);
+      const result = await create(company);
+      // адаптер отдаёт {id, created}, тесты могут вернуть просто строку
+      const argusId = typeof result === 'string' ? result : result.id;
+      const created = typeof result === 'string' ? true : result.created;
 
       db.prepare(`UPDATE leads SET enrich_state = 'ready', enrich_attempts = ?, enrich_error = NULL,
                     argus_company_id = ?, company = COALESCE(NULLIF(company, ''), ?), updated_at = ?
                   WHERE id = ?`)
         .run(attempts, argusId, company.title, nowIso(), lead.id);
-      logEvent(db, lead.id, 'company_created', { b24_id: company.b24_id, argus_company_id: argusId, contacts: company.contacts.length });
+      logEvent(db, lead.id, created ? 'company_created' : 'company_matched',
+        { b24_id: company.b24_id, argus_company_id: argusId, contacts: company.contacts.length });
       ready++;
     } catch (err) {
       failed++;
