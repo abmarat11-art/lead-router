@@ -5,14 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Вход — контур лидов</title>
 <style>
-  body { margin:0; height:100vh; display:grid; place-items:center; background:#0f1115; color:#e6e9ef;
+  body { margin:0; height:100vh; display:grid; place-items:center; background:#e3f5f3; color:#6b5312;
          font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif; }
-  form { background:#171a21; border:1px solid #252a35; border-radius:10px; padding:24px; width:280px; }
-  h1 { font-size:16px; margin:0 0 16px; }
-  input { width:100%; margin-bottom:10px; background:#0d0f14; border:1px solid #252a35; color:inherit;
+  form { background:#f4fbfa; border:1px solid #c8a53c; border-radius:10px; padding:24px; width:280px;
+         box-shadow:0 2px 12px rgba(200,165,60,.15); }
+  h1 { font-size:16px; margin:0 0 16px; letter-spacing:.02em; }
+  input { width:100%; margin-bottom:10px; background:#fff; border:1px solid #c8a53c; color:inherit;
           border-radius:6px; padding:8px 10px; font:inherit; }
-  button { width:100%; background:#4f8cff; border:0; color:#fff; padding:9px; border-radius:6px; font:inherit; cursor:pointer; }
-  .err { color:#f45b69; font-size:12px; min-height:16px; margin-top:8px; }
+  input::placeholder { color:#9a8544; }
+  button { width:100%; background:#c8a53c; border:1px solid #b8952c; color:#3b2c06; padding:9px;
+           border-radius:6px; font:inherit; font-weight:600; cursor:pointer; }
+  button:hover { filter:brightness(1.05); }
+  .err { color:#a8323f; font-size:12px; min-height:16px; margin-top:8px; }
 </style>
 </head>
 <body>
