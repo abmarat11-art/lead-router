@@ -7,7 +7,7 @@
 
   "_comment2": "Что писать в поле типа: лид или встреча.",
   "kindValues": {
-    "lead": "Лид",
-    "meeting": "Встреча"
+    "lead": "lead",
+    "meeting": "meeting"
   }
 }

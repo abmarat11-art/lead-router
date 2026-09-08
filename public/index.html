@@ -229,7 +229,7 @@ async function renderTeam() {
 }
 
 function membersTable(members) {
-  return `<table><tr><th>Имя</th><th>ID в Аргусе</th><th>Назначать сюда</th><th>Активен</th><th></th></tr>` +
+  return `<table><tr><th>Имя</th><th>publicId в Аргусе</th><th>Назначать сюда</th><th>Активен</th><th></th></tr>` +
     members.map(m => `<tr>
       <td><input value="${esc(m.name || '')}" placeholder="имя"
             onchange="patchMember(${m.id},{name:this.value||null})" style="width:150px"></td>
@@ -246,7 +246,7 @@ function membersTable(members) {
      <h3>Добавить человека</h3>
      <div class="row-actions">
        <input id="m-name" placeholder="имя">
-       <input id="m-id" placeholder="id пользователя в Аргусе" style="width:260px">
+       <input id="m-id" placeholder="publicId (uuid) в Аргусе" style="width:260px">
        <button class="act" onclick="createMember()">Добавить</button>
      </div>
      <p class="dim">Назначение уходит на отмеченного точкой. Остальные получают уведомления;

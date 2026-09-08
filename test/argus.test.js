@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { findCompanyByInn, createCompany, ensureCompany, okedCode } from '../src/adapters/argus.js';
+import { findCompanyByInn, createCompany, ensureCompany, assignCompany, okedCode } from '../src/adapters/argus.js';
 
 const COMPANY = {
   b24_id: '4021',
@@ -82,7 +82,7 @@ test('создание шлёт fields в формате Аргуса', async ()
   assert.equal(fields.CONTACT_PHONE, '+998901234567');
   assert.equal(fields.CONTACT_EMAIL, 'i@r.uz');
   assert.equal(fields.ASSIGNED_BY_ID, 'user-2', 'компания заводится сразу на ответственного команды');
-  assert.equal(fields.LEAD_TYPE, 'Встреча', 'тип пишется в отдельное поле');
+  assert.equal(fields.LEAD_TYPE, 'meeting', 'тип пишется в отдельное поле');
 });
 
 test('без ИНН компанию не отправляем: Аргус её всё равно не примет', async () => {
@@ -139,4 +139,42 @@ test('ensureCompany заводит новую, если ИНН не нашёлс
     fetchImpl: async (url) => (url.includes('companies.add') ? ok({ ID: 'fresh' }) : ok(LIST)),
   });
   assert.deepEqual(res, { id: 'fresh', created: true });
+});
+
+test('существующая компания передаётся ответственному через companies.update', async () => {
+  const calls = [];
+  const res = await ensureCompany(COMPANY, { assignedById: 'user-9', kind: 'meeting' }, {
+    fetchImpl: async (url, init) => {
+      calls.push({ url, body: JSON.parse(init.body) });
+      return url.includes('companies.update') ? ok({ ID: 'baa1dbcb' }) : ok(LIST);
+    },
+  });
+  assert.deepEqual(res, { id: 'baa1dbcb', created: false });
+  const update = calls.find((c) => c.url.includes('companies.update'));
+  assert.ok(update, 'ответственный проставляется, а не теряется на найденной компании');
+  assert.equal(update.body.ID, 'baa1dbcb');
+  assert.deepEqual(update.body.fields, { ASSIGNED_BY_ID: 'user-9', LEAD_TYPE: 'meeting' },
+    'шлём только назначение, карточку не перезаписываем');
+});
+
+test('назначения нет — companies.update не дёргаем впустую', async () => {
+  assert.equal(await assignCompany('x', {}, { fetchImpl: async () => { throw new Error('не должно вызываться'); } }), false);
+});
+
+test('409 по ИНН на создании: находим компанию и назначаем, а не роняем строку', async () => {
+  let updated = null;
+  let lists = 0;
+  const res = await ensureCompany({ ...COMPANY, inn: '301447821' }, { assignedById: 'user-4' }, {
+    fetchImpl: async (url, init) => {
+      if (url.includes('companies.add')) {
+        return { ok: false, status: 409, json: async () => ({ error: 'CONFLICT', error_description: 'ИНН занят' }) };
+      }
+      if (url.includes('companies.update')) { updated = JSON.parse(init.body); return ok({}); }
+      // первый list — компании ещё нет, второй (после 409) — уже есть
+      lists++;
+      return ok(lists === 1 ? [] : LIST);
+    },
+  });
+  assert.deepEqual(res, { id: 'baa1dbcb', created: false });
+  assert.equal(updated.fields.ASSIGNED_BY_ID, 'user-4');
 });

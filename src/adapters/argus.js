@@ -11,7 +11,8 @@ const RATE_LIMIT_PAUSE_MS = 2000;   // потолок 60 запросов в м�
 
 const DEFAULT_FIELDS = {
   fields: { assignedBy: 'ASSIGNED_BY_ID', kind: 'LEAD_TYPE' },
-  kindValues: { lead: 'Лид', meeting: 'Встреча' },
+  // Поле-список: у подписи («Лид») админ может поменять текст, ключ — нет.
+  kindValues: { lead: 'lead', meeting: 'meeting' },
 };
 
 let fieldConfig = null;
@@ -49,8 +50,12 @@ async function call(method, body = {}, { fetchImpl = fetch, retries = 1 } = {}) 
   }
 
   const data = await res.json().catch(() => ({}));
-  if (data.error) throw new Error(`Аргус ${method}: ${data.error_description || data.error}`);
-  if (!res.ok) throw new Error(`Аргус ${method}: HTTP ${res.status}`);
+  if (data.error || !res.ok) {
+    const err = new Error(`Аргус ${method}: ${data.error_description || data.error || `HTTP ${res.status}`}`);
+    err.status = res.status;
+    err.argusError = data.error || null;
+    throw err;
+  }
   return data.result;
 }
 
@@ -102,9 +107,7 @@ export async function createCompany(company, placement = {}, opts = {}) {
     CONTACT_EMAIL: contact?.email || contact?.emails?.[0] || undefined,
   };
 
-  const { fields: names, kindValues } = argusFields();
-  if (placement.assignedById) fields[names.assignedBy] = placement.assignedById;
-  if (placement.kind && kindValues[placement.kind]) fields[names.kind] = kindValues[placement.kind];
+  Object.assign(fields, placementFields(placement));
 
   const result = await call('companies.add', { fields }, opts);
   const id = result?.ID ?? result?.id ?? (typeof result === 'string' ? result : null);
@@ -112,9 +115,45 @@ export async function createCompany(company, placement = {}, opts = {}) {
   return String(id);
 }
 
-/** Есть — берём существующую, нет — заводим на ответственного команды. */
+/** Поля назначения: кому и с каким типом. */
+export function placementFields(placement = {}) {
+  const { fields: names, kindValues } = argusFields();
+  const out = {};
+  if (placement.assignedById) out[names.assignedBy] = placement.assignedById;
+  if (placement.kind && kindValues[placement.kind]) out[names.kind] = kindValues[placement.kind];
+  return out;
+}
+
+/**
+ * Сменить ответственного (и тип) у уже заведённой компании.
+ * Присланное поле меняется, остальная карточка не трогается —
+ * поэтому шлём только назначение, чтобы не затереть правки менеджеров.
+ */
+export async function assignCompany(id, placement = {}, opts = {}) {
+  const fields = placementFields(placement);
+  if (!Object.keys(fields).length) return false;
+  await call('companies.update', { ID: id, fields }, opts);
+  return true;
+}
+
+/**
+ * Есть — берём существующую и передаём ответственному, нет — заводим сразу на него.
+ * Гонка (кто-то завёл компанию между поиском и созданием) отдаёт 409 по ИНН —
+ * тогда находим её и назначаем, а не роняем строку.
+ */
 export async function ensureCompany(company, placement = {}, opts = {}) {
   const existing = await findCompanyByInn(company.inn, opts);
-  if (existing) return { id: existing, created: false };
-  return { id: await createCompany(company, placement, opts), created: true };
+  if (existing) {
+    await assignCompany(existing, placement, opts);
+    return { id: existing, created: false };
+  }
+  try {
+    return { id: await createCompany(company, placement, opts), created: true };
+  } catch (err) {
+    if (err.status !== 409) throw err;
+    const found = await findCompanyByInn(company.inn, opts);
+    if (!found) throw err;
+    await assignCompany(found, placement, opts);
+    return { id: found, created: false };
+  }
 }
