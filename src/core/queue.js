@@ -27,8 +27,9 @@ export function activeTeams(db) {
 }
 
 function cursor(db, kind) {
+  if (!kind) throw new Error('у строки не указан тип (лид или встреча)');
   db.prepare('INSERT OR IGNORE INTO queue_state (kind, cursor) VALUES (?, 0)').run(kind);
-  return db.prepare('SELECT cursor FROM queue_state WHERE kind = ?').get(kind).cursor;
+  return db.prepare('SELECT cursor FROM queue_state WHERE kind = ?').get(kind)?.cursor ?? 0;
 }
 
 function setCursor(db, kind, value) {
@@ -196,8 +197,11 @@ export function assignManually(db, leadId, teamId) {
 // Разобрать пул: всё, что пришло из таблицы с пустым статусом.
 export function dispatchQueue(db, { limit = 100 } = {}) {
   // компании, которые ещё заводятся в Аргусе, не раздаём
+  // kind обязателен: без него неизвестно, в какую из двух очередей ставить.
+  // Одна такая строка не должна ронять раздачу целиком.
   const leads = db.prepare(
-    "SELECT id FROM leads WHERE status = 'new' AND enrich_state = 'ready' ORDER BY imported_at, id LIMIT ?"
+    `SELECT id FROM leads WHERE status = 'new' AND enrich_state = 'ready'
+       AND kind IS NOT NULL ORDER BY imported_at, id LIMIT ?`
   ).all(limit);
   let assigned = 0;
   for (const { id } of leads) if (assignNext(db, id)) assigned++;

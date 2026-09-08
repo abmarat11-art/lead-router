@@ -89,7 +89,13 @@ export function importBatch(db, batch, config = loadConfig()) {
 
 // Строку из карантина вернули в работу после правки в шите.
 export function releaseFromQuarantine(db, leadId) {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
+  if (!lead) throw new Error('строка не найдена');
+  // Без типа раздавать некуда: у лидов и встреч разные очереди.
+  if (!lead.kind) throw new Error('у строки не указан тип (лид или встреча) — исправьте его в таблице');
+
   db.prepare("UPDATE leads SET status = 'new', quarantine_reason = NULL, updated_at = ? WHERE id = ? AND status = 'quarantine'")
     .run(nowIso(), leadId);
   logEvent(db, { leadId, kind: 'quarantine_released' });
+  return { ok: true };
 }

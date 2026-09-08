@@ -88,7 +88,7 @@ test('ручное назначение и отметка «в работе»', 
 
 test('карантин виден отдельно и возвращается в работу', () => withServer(async ({ call }) => {
   await call('/api/import/rows', 'POST', {
-    rows: rows(row('', '', 'Бек', '')),
+    rows: rows(row('', '', 'Бек', 'лид')),
   });
   const [bad] = (await call('/api/leads?status=quarantine')).body;
   assert.match(bad.quarantine_reason, /нет/);

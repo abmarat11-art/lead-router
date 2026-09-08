@@ -204,3 +204,16 @@ test('прочие ошибки создания не заминаются по�
   }), /TITLE обязателен/);
   assert.equal(calls, 1);
 });
+
+test('фродовая компания в Аргус не уезжает', async () => {
+  const { openMigrated } = await import('../src/db/index.js');
+  const { pending } = await import('../src/core/argusDelivery.js');
+  const db = openMigrated(':memory:');
+  db.prepare('INSERT INTO teams (id, name, queue_order, argus_user_id) VALUES (1, ?, 1, ?)').run('К1', 'u1');
+  for (const [id, status] of [[1, 'assigned'], [2, 'rejected'], [3, 'quarantine'], [4, 'escalated'], [5, 'in_work']]) {
+    db.prepare(`INSERT INTO leads (id, source_key, source_hash, company, kind, status, assigned_team, argus_state)
+                VALUES (?, ?, 'h', 'ООО', 'lead', ?, 1, 'pending')`).run(id, 'Лист1:' + id, status);
+  }
+  assert.deepEqual(pending(db).map((l) => l.id), [1, 5],
+    'закрытая компания не должна появиться в СРМ — удалить её оттуда нечем');
+});

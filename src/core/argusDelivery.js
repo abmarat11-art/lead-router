@@ -20,7 +20,9 @@ export function pending(db, limit = 20) {
         t.argus_user_id
       ) AS argus_user_id
     FROM leads l JOIN teams t ON t.id = l.assigned_team
+    -- Фрод и карантин в СРМ не заводим: компания закрыта, ход был потрачен впустую.
     WHERE l.argus_state = 'pending' AND l.argus_attempts < ?
+      AND l.status IN ('assigned', 'in_work')
     ORDER BY l.id LIMIT ?`).all(MAX_ATTEMPTS, limit);
 }
 

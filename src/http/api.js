@@ -160,7 +160,7 @@ export function createHandler(db, { importNow } = {}) {
               : assignNext(db, id) || { escalated: true });
           case 'in-work':  return json(res, 200, markInWork(db, id));
           case 'decline':  return json(res, 200, markDeclined(db, id, body.reason || 'отказ вручную'));
-          case 'release':  releaseFromQuarantine(db, id); return json(res, 200, { ok: true });
+          case 'release':  return json(res, 200, releaseFromQuarantine(db, id));
           case 'escalate': escalate(db, id, body.reason || 'вручную'); return json(res, 200, { ok: true });
           case 'kind':
             db.prepare('UPDATE leads SET kind = ? WHERE id = ?').run(body.kind, id);

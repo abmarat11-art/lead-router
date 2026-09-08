@@ -85,9 +85,9 @@ test('правка данных лидгеном обновляет компан
   assert.ok(db.prepare("SELECT 1 FROM events WHERE kind = 'source_row_changed'").get());
 });
 
-test('строка без контактов и без типа уходит в карантин', () => {
+test('строка без контактов уходит в карантин и возвращается оттуда', () => {
   const db = setup();
-  const stats = load(db, row({ 1: '', 2: '', 3: '', 5: '' }));
+  const stats = load(db, row({ 1: '', 2: '', 3: '' }));
   assert.equal(stats.quarantined, 1);
   const lead = db.prepare('SELECT * FROM leads').get();
   assert.match(lead.quarantine_reason, /нет телефона/);
@@ -133,4 +133,27 @@ test('статус читается по любому из синонимов, �
   assert.equal(normalizeStatus('в работе', cfg), 'in_work');
   assert.equal(normalizeStatus('что-то своё', cfg), 'other');
   assert.equal(normalizeStatus('', cfg), null);
+});
+
+test('из карантина не выпускаем строку без типа: она сломает раздачу', () => {
+  const db = openMigrated(':memory:');
+  db.prepare(`INSERT INTO leads (id, source_key, source_hash, company, kind, status, quarantine_reason)
+              VALUES (1, 'Лист1:2', 'h', 'ООО Без типа', NULL, 'quarantine', 'не указан тип лида')`).run();
+
+  assert.throws(() => releaseFromQuarantine(db, 1), /тип/);
+  assert.equal(db.prepare('SELECT status FROM leads WHERE id = 1').get().status, 'quarantine');
+});
+
+test('строка без типа не берётся в раздачу и не роняет остальные', async () => {
+  const { dispatchQueue } = await import('../src/core/queue.js');
+  const db = openMigrated(':memory:');
+  db.prepare('INSERT INTO teams (id, name, queue_order) VALUES (1, ?, 1)').run('К1');
+  db.prepare(`INSERT INTO leads (id, source_key, source_hash, company, kind, status, enrich_state)
+              VALUES (1, 'Лист1:2', 'h', 'Без типа', NULL, 'new', 'ready')`).run();
+  db.prepare(`INSERT INTO leads (id, source_key, source_hash, company, kind, status, enrich_state)
+              VALUES (2, 'Лист1:3', 'h2', 'Нормальная', 'lead', 'new', 'ready')`).run();
+
+  const out = dispatchQueue(db);
+  assert.deepEqual(out, { seen: 1, assigned: 1 }, 'битая строка пропущена, здоровая роздана');
+  assert.equal(db.prepare('SELECT status FROM leads WHERE id = 1').get().status, 'new');
 });
