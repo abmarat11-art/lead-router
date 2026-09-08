@@ -61,7 +61,7 @@ export function importBatch(db, batch, config = loadConfig()) {
 
     const leadStatus = problems.length ? 'quarantine'
       : status === 'in_work' ? 'in_work'
-      : status === 'declined' ? 'rejected'   // фрод: строка закрыта, в очередь не идёт
+      : status === 'declined' ? 'rejected'   // отказ: строка закрыта, в очередь не идёт
       : status ? 'assigned'                  // строка уже помечена кем-то — не трогаем
       : 'new';
 

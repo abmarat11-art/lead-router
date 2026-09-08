@@ -63,7 +63,7 @@ test('СРМ поставила «отказ» — компания закрыв
   assert.equal(db.prepare("SELECT COUNT(*) c FROM queue_priority WHERE team_id = 1 AND consumed_at IS NULL").get().c, 1);
 });
 
-test('строка, помеченная фродом до первого импорта, в очередь не идёт', () => {
+test('строка, помеченная отказом до первого импорта, в очередь не идёт', () => {
   const db = setup();
   load(db, row({ 6: 'Отказ' }));
   assert.equal(db.prepare('SELECT status s FROM leads').get().s, 'rejected');

@@ -54,7 +54,7 @@ test('заливка строк и распределение по кругу к
   assert.equal(byCompany['Delta Trade'], 'Команда 1');   // встречи — своя очередь
 }));
 
-test('фрод из СРМ закрывает компанию и даёт команде долг', () => withServer(async ({ call }) => {
+test('отказ из СРМ закрывает компанию и даёт команде долг', () => withServer(async ({ call }) => {
   await call('/api/import/rows', 'POST', {
     rows: rows(row('ООО Ромашка', '901234567', 'Аня', 'Лид')),
   });

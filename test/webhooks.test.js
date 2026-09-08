@@ -51,14 +51,14 @@ test('назначение кладёт lead.assigned с компанией и �
   assert.equal(payload.team.name, 'Команда 1');
 });
 
-test('фрод шлёт lead.declined и на этом цикл компании закрыт', () => {
+test('отказ шлёт lead.declined и на этом цикл компании закрыт', () => {
   const db = setup();
   assignNext(db, 1);
-  markDeclined(db, 1, 'фрод от лидгена');
+  markDeclined(db, 1, 'отказ из СРМ');
   const events = db.prepare('SELECT event FROM webhook_outbox ORDER BY id').all().map((r) => r.event);
   assert.deepEqual(events, ['lead.assigned', 'lead.declined']);
   const payload = JSON.parse(db.prepare("SELECT payload FROM webhook_outbox WHERE event = 'lead.declined'").get().payload);
-  assert.equal(payload.reason, 'фрод от лидгена');
+  assert.equal(payload.reason, 'отказ из СРМ');
   assert.equal(payload.team.name, 'Команда 1');
 });
 

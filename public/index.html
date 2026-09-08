@@ -23,7 +23,7 @@
 <div id="modal" onclick="if(event.target.id==='modal') closeTeam()"><div class="box" id="modal-box"></div></div>
 <main id="view">загрузка…</main>
 <script>
-const TABS = [['new','Пул'],['assigned','Назначены'],['in_work','В работе'],['rejected','Фрод'],['quarantine','Карантин'],['escalated','Эскалация'],['queues','Очереди'],['teams','Команды']];
+const TABS = [['new','Пул'],['assigned','Назначены'],['in_work','В работе'],['rejected','Отказы'],['quarantine','Карантин'],['escalated','Эскалация'],['queues','Очереди'],['teams','Команды']];
 const KIND_RU = { lead: 'лид', meeting: 'встреча' };
 let tab = 'new', teams = [], queues = [], data = [], st = {};
 
@@ -148,7 +148,7 @@ function renderLeads() {
         ${l.status === 'quarantine' ? `<button class="ghost" onclick="act(${l.id},'release')">В пул</button>` : ''}
         ${['new','escalated'].includes(l.status) ? `<button class="ghost" onclick="act(${l.id},'assign')">Назначить по очереди</button>` : ''}
         ${l.status === 'assigned' ? `<button class="ghost" onclick="act(${l.id},'in-work')">В работе</button>
-          <button class="ghost" onclick="act(${l.id},'decline')">Фрод</button>` : ''}
+          <button class="ghost" onclick="act(${l.id},'decline')">Отказ</button>` : ''}
         <select onchange="assignTo(${l.id}, this.value)"><option value="">команде…</option>${opts}</select>
       </td></tr>`).join('') + '</table>';
 }
@@ -161,13 +161,13 @@ function renderQueues() {
     <div class="chain">${q.preview.map(p =>
       `<span class="chip ${p.via_priority ? 'prio' : ''}">${esc(teamName(p.team_id))}${p.via_priority ? ' ↑' : ''}</span>`).join('<span class="dim">→</span>')}</div>
     <p class="dim">${q.priority.length
-      ? 'долг после фрода: ' + q.priority.map(p => esc(p.team_name)).join(', ')
+      ? 'долг после отказа: ' + q.priority.map(p => esc(p.team_name)).join(', ')
       : 'внеочередников нет, идёт обычный круг'}</p>`).join('');
 }
 
 function renderTeams() {
   const byId = Object.fromEntries(teams.map(t => [t.id, t]));
-  return `<table><tr><th>Порядок</th><th>Команда</th><th>Состав</th><th>Назначено сейчас</th><th>Взяли в работу</th><th>Фрод</th><th>Активна</th></tr>` +
+  return `<table><tr><th>Порядок</th><th>Команда</th><th>Состав</th><th>Назначено сейчас</th><th>Взяли в работу</th><th>Отказы</th><th>Активна</th></tr>` +
     (st.teams || []).map(t => {
       const members = byId[t.id]?.members || [];
       const main = members.find(m => m.role === 'assignee' && m.active);
@@ -267,7 +267,7 @@ function membersTable(members) {
        <button class="ghost" onclick="whoWrote()">Кто написал боту</button>
      </div>
      <p class="dim">Назначение уходит на отмеченного точкой. Остальные получают уведомления;
-        отметить «принять» или «фрод» может любой из них.</p>
+        отметить «принято» или «отказ» может любой из них.</p>
      <p class="dim">Чтобы человеку приходили уведомления, он должен один раз написать боту «Старт» —
         телеграм не даёт ботам писать первыми. После этого его видно по кнопке «Кто написал боту».</p>
      <div id="tg-contacts"></div>`;

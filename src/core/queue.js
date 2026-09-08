@@ -3,7 +3,7 @@
 // По умолчанию круг: 1,2,3,4,1,2,3,4… Отдельный курсор на лиды и на встречи —
 // очереди независимы.
 //
-// Отказ из СРМ = фрод от лидгена. Компания закрывается и никому больше не идёт
+// Отказ из СРМ = пустышка от лидгена. Компания закрывается и никому больше не идёт
 // (в СРМ её снимают с команды в отстойник), но команда получила пустышку вместо
 // своего хода — за ней остаётся долг: следующую компанию она получит вне очереди.
 // Пример: назначили на 3, прилетел отказ от 1 → 1,2,3,[1],4,1,2,3,4
@@ -37,8 +37,8 @@ function setCursor(db, kind, value) {
     .run(kind, value);
 }
 
-// За командой остался долг: её ход ушёл на фрод, компенсируем вне очереди.
-export function pushPriority(db, kind, teamId, { leadId = null, reason = 'фрод: отказ из СРМ' } = {}) {
+// За командой остался долг: её ход ушёл на пустышку, компенсируем вне очереди.
+export function pushPriority(db, kind, teamId, { leadId = null, reason = 'отказ из СРМ' } = {}) {
   db.prepare('INSERT INTO queue_priority (kind, team_id, lead_id, reason) VALUES (?, ?, ?, ?)')
     .run(kind, teamId, leadId, reason);
   logEvent(db, { leadId, teamId, kind: 'queue_debt', data: { queue: kind, reason } });
@@ -85,7 +85,7 @@ function commitPick(db, kind, pick, closedByLeadId) {
   setCursor(db, kind, pick.team.queue_order);
 }
 
-// Галочка «долг закрыт» напротив той самой фродовой строки в таблице.
+// Галочка «долг закрыт» напротив той самой отказанной строки в таблице.
 function markDebtClosedInSheet(db, debt) {
   if (!debt.lead_id || !process.env.SHEETS_SPREADSHEET_ID) return;
   const cfg = getConfig();
@@ -145,7 +145,7 @@ export function markInWork(db, leadId) {
   return { ok: true };
 }
 
-// СРМ отметила «отказ» — это фрод от лидгена. Компанию закрываем: в СРМ её сняли
+// СРМ отметила «отказ» — лид оказался пустым. Компанию закрываем: в СРМ её сняли
 // с команды в отстойник, дальше по кругу она не идёт. Команде записываем долг:
 // её ход ушёл впустую, следующую компанию она получит вне очереди.
 export function markDeclined(db, leadId, reason = null) {
@@ -154,7 +154,7 @@ export function markDeclined(db, leadId, reason = null) {
   if (a) {
     db.prepare("UPDATE assignments SET state = 'declined', resolved_at = ?, reason = ? WHERE id = ?")
       .run(nowIso(), reason, a.id);
-    pushPriority(db, lead.kind, a.team_id, { leadId, reason: reason || 'фрод: отказ из СРМ' });
+    pushPriority(db, lead.kind, a.team_id, { leadId, reason: reason || 'отказ из СРМ' });
   }
 
   db.prepare(`UPDATE leads SET status = 'rejected', decline_count = decline_count + 1,

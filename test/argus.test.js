@@ -205,7 +205,7 @@ test('прочие ошибки создания не заминаются по�
   assert.equal(calls, 1);
 });
 
-test('фродовая компания в Аргус не уезжает', async () => {
+test('отказанная компания в Аргус не уезжает', async () => {
   const { openMigrated } = await import('../src/db/index.js');
   const { pending } = await import('../src/core/argusDelivery.js');
   const db = openMigrated(':memory:');
