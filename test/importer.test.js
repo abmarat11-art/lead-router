@@ -4,6 +4,7 @@ import { openMigrated } from '../src/db/index.js';
 import { importBatch, releaseFromQuarantine } from '../src/core/importer.js';
 import { toBatch } from '../src/adapters/sheets.js';
 import { resolveConfig, DEFAULT_CONFIG } from '../src/core/columns.js';
+import { normalizeStatus } from '../src/core/normalize.js';
 
 // A дата | B компания | C контакт | D телефон | E лидген | F тип лида | G статус
 const CFG = resolveConfig(DEFAULT_CONFIG);
@@ -120,4 +121,16 @@ test('строка, где заполнен только служебный че
   ], CHK);
   assert.deepEqual(batch.rows.map((r) => r.key), ['Лист1:2'],
     'пустые строки с одним лишь чекбоксом и статусом отсекаются');
+});
+
+test('статус читается по любому из синонимов, а пишем всегда своё слово', () => {
+  const cfg = resolveConfig({
+    ...DEFAULT_CONFIG,
+    statuses: { assigned: ['назначено'], in_work: ['в работе', 'принято'], declined: ['отказ', 'фрод'] },
+  });
+  assert.equal(normalizeStatus('принято', cfg), 'in_work', 'СРМ пишет «принято» — это работа, а не чужое слово');
+  assert.equal(normalizeStatus('  ФРОД ', cfg), 'declined');
+  assert.equal(normalizeStatus('в работе', cfg), 'in_work');
+  assert.equal(normalizeStatus('что-то своё', cfg), 'other');
+  assert.equal(normalizeStatus('', cfg), null);
 });

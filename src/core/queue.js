@@ -12,6 +12,9 @@ import { getConfig } from './columns.js';
 
 export const KINDS = ['lead', 'meeting'];
 
+// В таблицу пишем первое значение списка: остальные — то, что мы лишь понимаем при чтении.
+const writeValue = (v) => (Array.isArray(v) ? v[0] : v);
+
 const nowIso = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 
 export function logEvent(db, { leadId = null, teamId = null, kind, data = {} }) {
@@ -124,7 +127,7 @@ export function queueSheetWrite(db, lead, column, value) {
   if (!process.env.SHEETS_SPREADSHEET_ID) return null;   // таблица не подключена
   const cfg = getConfig();
   const info = db.prepare('INSERT INTO sheet_writes (lead_id, source_key, column_ref, value) VALUES (?, ?, ?, ?)')
-    .run(lead.id, lead.source_key, column || cfg.statusColumn, value ?? cfg.statuses.assigned);
+    .run(lead.id, lead.source_key, column || cfg.statusColumn, value ?? writeValue(cfg.statuses.assigned));
   return Number(info.lastInsertRowid);
 }
 

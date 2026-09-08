@@ -74,7 +74,7 @@ button:disabled { opacity:.45; cursor:not-allowed; box-shadow:none; }
 #modal { position:fixed; inset:0; background:rgba(30,50,48,.35); display:none; place-items:center; z-index:10; }
 #modal.on { display:grid; }
 #modal .box { background:var(--card); border:1px solid var(--gold); border-radius:10px; padding:20px;
-              width:min(720px,92vw); max-height:86vh; overflow:auto;
+              width:min(1180px,96vw); max-height:92vh; overflow:auto;
               box-shadow:inset 0 1px 1px rgba(255,255,255,.45), 0 8px 30px rgba(94,74,34,.28); }
 #modal h2 { margin:0 0 4px; font-size:16px; }
 #modal .close { float:right; }
@@ -84,3 +84,7 @@ button:disabled { opacity:.45; cursor:not-allowed; box-shadow:none; }
               border:1px solid var(--gold-dark); border-top-color:rgba(255,255,255,.6); box-shadow:var(--gloss);
               text-shadow:0 1px 0 rgba(255,255,255,.3); }
 .stale { color:var(--bad); font-weight:600; }
+
+/* Модалки: содержимое подстраивается под ширину окна, без горизонтального скролла */
+#modal .box table { table-layout:auto; }
+#modal .box table input[type=text], #modal .box table input:not([type]) { width:100%; min-width:0; box-sizing:border-box; }
