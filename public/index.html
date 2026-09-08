@@ -172,8 +172,12 @@ function renderTeams() {
       const members = byId[t.id]?.members || [];
       const main = members.find(m => m.role === 'assignee' && m.active);
       return `<tr>
-      <td>${t.queue_order}</td>
-      <td><button class="ghost" onclick="openTeam(${t.id})">${esc(t.name)}</button></td>
+      <td><input type="number" min="1" value="${t.queue_order}" style="width:60px"
+            title="место в круге раздачи"
+            onchange="renameTeam(${t.id},{queue_order:Number(this.value)})"></td>
+      <td><input value="${esc(t.name)}" style="width:170px"
+            onchange="renameTeam(${t.id},{name:this.value.trim()})">
+          <button class="ghost" onclick="openTeam(${t.id})">Состав</button></td>
       <td>${main
           ? `<span class="badge-main">${esc(main.name || main.argus_user_id)}</span>`
           : '<span class="dim">получатель не выбран — компании не уедут</span>'}
@@ -191,6 +195,14 @@ function renderTeams() {
     <h3>Компании в Аргусе</h3><div class="cards">${
       Object.entries(st.argus || {}).map(([k, v]) => `<div class="card"><b>${v}</b><span>${k}</span></div>`).join('') || '<span class="dim">пока не отправляли</span>'
     }</div>`;
+}
+
+async function renameTeam(id, patch) {
+  if (patch.name === '') return toast('название не может быть пустым', 'bad');
+  const res = await api(`/api/teams/${id}`, 'PATCH', patch);
+  if (res && res.error) return toast(res.error, 'bad');
+  toast('сохранено');
+  load();
 }
 
 // ---- карточка команды: состав и история ----

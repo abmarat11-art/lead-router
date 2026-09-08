@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { openMigrated } from '../src/db/index.js';
 import {
   addMember, updateMember, removeMember, listMembers, teamHistory,
-  assigneeOf, notifyListOf,
+  assigneeOf, notifyListOf, renameTeam,
 } from '../src/core/teams.js';
 import { deliverPending } from '../src/core/argusDelivery.js';
 import { assignNext } from '../src/core/queue.js';
@@ -119,4 +119,21 @@ test('вписали получателя — упавшие компании в
   assert.equal(lead.argus_state, 'pending', 'иначе компания навсегда останется незаведённой');
   assert.equal(lead.argus_attempts, 0);
   assert.equal(lead.argus_error, null);
+});
+
+test('пустое имя команды не сохраняем: в очередях останется безымянная строка', () => {
+  const db = setup();
+  assert.throws(() => renameTeam(db, 1, { name: '  ' }), /название/);
+  assert.equal(db.prepare('SELECT name FROM teams WHERE id = 1').get().name, 'Команда 1');
+});
+
+test('переименование пишется в журнал команды', () => {
+  const db = setup();
+  renameTeam(db, 1, { name: 'Альфа', queue_order: 2 });
+  const team = db.prepare('SELECT * FROM teams WHERE id = 1').get();
+  assert.equal(team.name, 'Альфа');
+  assert.equal(team.queue_order, 2);
+  const last = teamHistory(db, 1)[0];
+  assert.equal(last.kind, 'team_changed');
+  assert.match(last.data, /Альфа/);
 });

@@ -78,6 +78,35 @@ export function updateMember(db, teamId, memberId, patch) {
   return after;
 }
 
+/** Переименование и место в круге. Пустое имя не пропускаем: команда без названия
+ *  превращает вкладку «Очереди» в список безымянных строк. */
+export function renameTeam(db, teamId, patch) {
+  const before = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
+  if (!before) throw new Error('команда не найдена');
+
+  const fields = [];
+  const values = [];
+  for (const [k, v] of Object.entries(patch)) {
+    if (!['name', 'queue_order', 'active'].includes(k)) continue;
+    if (k === 'name') {
+      const name = String(v ?? '').trim();
+      if (!name) throw new Error('название команды не может быть пустым');
+      fields.push('name = ?'); values.push(name);
+      continue;
+    }
+    fields.push(`${k} = ?`); values.push(v);
+  }
+  if (!fields.length) return before;
+
+  db.prepare(`UPDATE teams SET ${fields.join(', ')} WHERE id = ?`).run(...values, teamId);
+  const after = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
+  logTeamChange(db, teamId, 'team_changed', {
+    was: { name: before.name, queue_order: before.queue_order, active: before.active },
+    now: { name: after.name, queue_order: after.queue_order, active: after.active },
+  });
+  return after;
+}
+
 export function removeMember(db, teamId, memberId) {
   const member = db.prepare('SELECT * FROM team_members WHERE id = ? AND team_id = ?').get(memberId, teamId);
   if (!member) return { ok: false };

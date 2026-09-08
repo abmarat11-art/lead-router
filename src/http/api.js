@@ -11,6 +11,7 @@ import { releaseFromQuarantine, importBatch } from '../core/importer.js';
 import { getConfig } from '../core/columns.js';
 import {
   listMembers, teamHistory, addMember, updateMember, removeMember, logTeamChange,
+  renameTeam,
 } from '../core/teams.js';
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
@@ -191,24 +192,11 @@ export function createHandler(db, { importNow } = {}) {
 
       if (req.method === 'PATCH' && seg[1] === 'teams' && seg[2]) {
         const b = await readJson(req);
-        const fields = [];
-        const values = [];
-        for (const [k, v] of Object.entries(b)) {
-          if (!['name', 'queue_order', 'active', 'argus_user_id'].includes(k)) continue;
-          fields.push(`${k} = ?`);
-          values.push(v);
-        }
         const teamId = Number(seg[2]);
-        if (fields.length) {
-          const before = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
-          db.prepare(`UPDATE teams SET ${fields.join(', ')} WHERE id = ?`).run(...values, teamId);
-          const after = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
-          logTeamChange(db, teamId, 'team_changed', {
-            was: { name: before.name, queue_order: before.queue_order, active: before.active },
-            now: { name: after.name, queue_order: after.queue_order, active: after.active },
-          });
+        if (b.argus_user_id !== undefined) {
+          db.prepare('UPDATE teams SET argus_user_id = ? WHERE id = ?').run(b.argus_user_id, teamId);
         }
-        return json(res, 200, { ok: true });
+        return json(res, 200, renameTeam(db, teamId, b));
       }
 
       // ---- статика ----
