@@ -208,7 +208,7 @@ test('одинаковый отказ подряд не шлём: человек
   await collectContacts(db, { fetch: async () => [upd(3, 'qwerty2801')], send });
   await collectContacts(db, { fetch: async () => [upd(4, 'ещё попытка')], send });
 
-  assert.equal(sent.length, 2, 'приветствие и один отказ, дальше молчим');
+  assert.equal(sent.length, 2, 'приветствие и один отказ — подряд не повторяемся');
   assert.match(sent[0], /ID в Аргусе/);
   assert.match(sent[1], /Такого ID в списке команд нет/);
 });
@@ -225,4 +225,20 @@ test('после отказов верный ID всё равно принима
 
   assert.equal(db.prepare("SELECT telegram_chat_id t FROM team_members WHERE argus_user_id='aziztur'").get().t, '5');
   assert.match(sent[sent.length - 1], /Команда 1/);
+});
+
+test('через минуту молчания отвечаем снова: человек не должен решить, что бот умер', async () => {
+  const db = setup();
+  const sent = [];
+  const send = async (chat, text) => sent.push(text);
+  const upd = (id, text) => ({ update_id: id, message: { from: { id: 5 }, chat: { id: 5 }, text } });
+
+  await collectContacts(db, { fetch: async () => [upd(1, 'karinatyo')], send });
+  await collectContacts(db, { fetch: async () => [upd(2, 'karinatyo')], send });
+  assert.equal(sent.length, 1, 'сразу подряд — один ответ');
+
+  // «прошла минута»
+  db.prepare("UPDATE tg_contacts SET last_reply_at = datetime('now', '-2 minutes')").run();
+  await collectContacts(db, { fetch: async () => [upd(3, 'karinatyo')], send });
+  assert.equal(sent.length, 2, 'через минуту отвечаем снова');
 });

@@ -159,9 +159,9 @@ export async function collectContacts(db, { fetch: fetchUpdates = getUpdates, se
     const text = u.message?.text || '';
     const reply = answerFor(db, chat.id, text, known);
     if (!known) added++;
-    // Один и тот же ответ подряд не шлём: человек перебирает варианты,
-    // а получает стену одинаковых сообщений.
-    if (reply && reply !== lastReplyTo(db, chat.id)) {
+    // Повтор гасим по времени, а не навсегда: стена одинаковых сообщений плоха,
+    // но полное молчание человек читает как «бот сломался».
+    if (reply && !justSaid(db, chat.id, reply)) {
       try { await send(String(chat.id), reply); } catch { /* заблокировал бота — не беда */ }
       rememberReply(db, chat.id, reply);
     }
@@ -170,11 +170,18 @@ export async function collectContacts(db, { fetch: fetchUpdates = getUpdates, se
   return { seen: updates.length, added };
 }
 
-const lastReplyTo = (db, chatId) =>
-  db.prepare('SELECT last_reply FROM tg_contacts WHERE chat_id = ?').get(String(chatId))?.last_reply ?? null;
+const REPEAT_SILENCE_SEC = 60;
+
+/** Тот же ответ этому человеку меньше минуты назад — молчим. */
+function justSaid(db, chatId, reply, nowMs = Date.now()) {
+  const row = db.prepare('SELECT last_reply, last_reply_at FROM tg_contacts WHERE chat_id = ?').get(String(chatId));
+  if (!row || row.last_reply !== reply || !row.last_reply_at) return false;
+  return (nowMs - Date.parse(row.last_reply_at + 'Z')) < REPEAT_SILENCE_SEC * 1000;
+}
 
 const rememberReply = (db, chatId, reply) =>
-  db.prepare('UPDATE tg_contacts SET last_reply = ? WHERE chat_id = ?').run(reply, String(chatId));
+  db.prepare("UPDATE tg_contacts SET last_reply = ?, last_reply_at = datetime('now') WHERE chat_id = ?")
+    .run(reply, String(chatId));
 
 // Что ответить человеку: просим ID, а на верный ID — подтверждаем команду.
 function answerFor(db, chatId, text, known) {

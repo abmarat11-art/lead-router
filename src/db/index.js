@@ -20,6 +20,7 @@ export function migrate(db) {
   // а migrate() выполняется на каждом старте.
   addColumn(db, 'team_members', 'telegram_chat_id', 'TEXT');
   addColumn(db, 'tg_contacts', 'last_reply', 'TEXT');
+  addColumn(db, 'tg_contacts', 'last_reply_at', 'TEXT');
   return db;
 }
 
