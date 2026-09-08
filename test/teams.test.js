@@ -106,3 +106,17 @@ test('назначение и смена статуса проставляют �
   assert.ok(lead.assigned_at, 'записано время назначения');
   assert.ok(lead.status_changed_at, 'записано время смены статуса');
 });
+
+test('вписали получателя — упавшие компании возвращаются в очередь доставки', () => {
+  const db = setup();
+  const id = addLead(db);
+  db.prepare(`UPDATE leads SET assigned_team = 1, argus_state = 'failed', argus_attempts = 5,
+              argus_error = 'у команды «Команда 1» не выбран получатель назначения' WHERE id = ?`).run(id);
+
+  addMember(db, 1, { argus_user_id: 'uuid-1', name: 'Ойбек', role: 'assignee' });
+
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(id);
+  assert.equal(lead.argus_state, 'pending', 'иначе компания навсегда останется незаведённой');
+  assert.equal(lead.argus_attempts, 0);
+  assert.equal(lead.argus_error, null);
+});

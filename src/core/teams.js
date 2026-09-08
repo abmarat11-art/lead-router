@@ -1,3 +1,4 @@
+import { retryTeam } from './argusDelivery.js';
 // Команда — это люди в Аргусе. Один из них получает назначение (роль assignee),
 // остальные видят уведомления. Любую правку пишем в журнал команды: через месяц
 // нужно понимать, почему компания ушла именно на этого человека.
@@ -27,6 +28,13 @@ export const notifyListOf = (db, teamId) =>
   db.prepare("SELECT * FROM team_members WHERE team_id = ? AND role = 'notify' AND active = 1 ORDER BY id")
     .all(teamId).map((m) => m.argus_user_id);
 
+/** Появился получатель — поднимаем то, что упало без него. */
+function reviveTeamDelivery(db, teamId) {
+  if (!assigneeOf(db, teamId)) return;
+  const { revived } = retryTeam(db, teamId);
+  if (revived) logTeamChange(db, teamId, 'delivery_retried', { revived });
+}
+
 export function addMember(db, teamId, { argus_user_id, name = null, role = 'notify' }) {
   if (!argus_user_id) throw new Error('нужен id пользователя в Аргусе');
   if (role === 'assignee') demoteAssignees(db, teamId);
@@ -36,6 +44,7 @@ export function addMember(db, teamId, { argus_user_id, name = null, role = 'noti
   ).run(teamId, String(argus_user_id).trim(), name, role);
 
   logTeamChange(db, teamId, 'member_added', { argus_user_id, name, role });
+  reviveTeamDelivery(db, teamId);
   return Number(info.lastInsertRowid);
 }
 
@@ -64,6 +73,7 @@ export function updateMember(db, teamId, memberId, patch) {
     was: { role: before.role, active: before.active, argus_user_id: before.argus_user_id },
     now: { role: after.role, active: after.active, argus_user_id: after.argus_user_id },
   });
+  reviveTeamDelivery(db, teamId);
   return after;
 }
 

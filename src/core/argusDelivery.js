@@ -24,6 +24,19 @@ export function pending(db, limit = 20) {
 }
 
 /**
+ * Вернуть в очередь доставки строки команды, упавшие из-за ненастроенного получателя.
+ * Иначе они молча остаются в failed: команду заполнили, а компании так и не уехали.
+ */
+export function retryTeam(db, teamId) {
+  const info = db.prepare(`
+    UPDATE leads SET argus_state = 'pending', argus_attempts = 0, argus_error = NULL, updated_at = ?
+    WHERE assigned_team = ? AND argus_state = 'failed'`).run(nowIso(), teamId);
+  const revived = Number(info.changes || 0);
+  if (revived) logEvent(db, null, teamId, 'argus_retry_team', { revived });
+  return { revived };
+}
+
+/**
  * Один проход доставки.
  * @param {{ensure?: Function}} deps подменяется в тестах
  */

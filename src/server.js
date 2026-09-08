@@ -52,7 +52,9 @@ every(30_000, async () => {
   const { assigned } = dispatchQueue(db);
   if (assigned) log(`распределено: ${assigned}`);
 
-  if (process.env.ARGUS_API_URL) {
+  // ARGUS_AUTOSEND=0 — компании не уезжают сами: заведение в СРМ необратимо
+  // (метода удаления в API нет), поэтому первый прогон делается кнопкой руками.
+  if (process.env.ARGUS_API_URL && process.env.ARGUS_AUTOSEND !== '0') {
     const delivered = await deliverPending(db);
     if (delivered.picked) log('в Аргус', JSON.stringify(delivered));
   }
