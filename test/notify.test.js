@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openMigrated } from '../src/db/index.js';
-import { addMember } from '../src/core/teams.js';
-import { enqueueAssignment, flushNotifications, buildText, companyLinks, collectContacts, knownContacts } from '../src/core/notify.js';
+import { addMember, teamHistory } from '../src/core/teams.js';
+import { enqueueAssignment, flushNotifications, buildText, companyLinks, collectContacts, knownContacts, bindByLogin } from '../src/core/notify.js';
 
 function setup() {
   const db = openMigrated(':memory:');
@@ -121,6 +121,44 @@ test('кто написал боту — запоминается у нас, а 
   const list = knownContacts(db);
   assert.deepEqual(list.map((c) => c.chat_id).sort(), ['5', '7']);
   assert.equal(list.find((c) => c.chat_id === '5').name, 'Азиз Турдиев');
+});
+
+test('человек прислал логин Аргуса — привязался сам, без руководителя', async () => {
+  const db = setup();
+  addMember(db, 1, { argus_user_id: 'aziztur', name: 'Азиз Турдиев' });
+
+  const sent = [];
+  await collectContacts(db, {
+    fetch: async () => [
+      { update_id: 1, message: { from: { id: 55, first_name: 'Азиз' }, chat: { id: 55 }, text: '/start' } },
+      { update_id: 2, message: { from: { id: 55, first_name: 'Азиз' }, chat: { id: 55 }, text: ' AzizTur ' } },
+    ],
+    send: async (chat, text) => sent.push(text),
+  });
+
+  const member = db.prepare("SELECT * FROM team_members WHERE argus_user_id = 'aziztur'").get();
+  assert.equal(member.telegram_chat_id, '55', 'регистр и пробелы в логине не мешают');
+  assert.match(sent[0], /логин в Аргусе/, 'на «Старт» просим логин');
+  assert.match(sent[1], /Команда 1/, 'подтверждаем команду, чтобы человек видел результат');
+});
+
+test('незнакомый логин — говорим прямо, а не молчим', async () => {
+  const db = setup();
+  const sent = [];
+  await collectContacts(db, {
+    fetch: async () => [{ update_id: 1, message: { from: { id: 55 }, chat: { id: 55 }, text: 'кто-то-левый' } }],
+    send: async (chat, text) => sent.push(text),
+  });
+  assert.match(sent[0], /Такого логина в списке команд нет/);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM team_members WHERE telegram_chat_id IS NOT NULL').get().c, 0);
+});
+
+test('привязка по логину пишется в журнал команды', () => {
+  const db = setup();
+  addMember(db, 1, { argus_user_id: 'aziztur', name: 'Азиз' });
+  assert.equal(bindByLogin(db, '77', 'aziztur').ok, true);
+  const last = teamHistory(db, 1)[0];
+  assert.match(last.data, /77/);
 });
 
 test('повторный проход не здоровается заново и двигает курсор', async () => {

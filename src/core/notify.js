@@ -1,6 +1,7 @@
 // Уведомления команде о назначении: получателю и всем, кто в списке уведомлений.
 // Пишем в очередь, отправляет воркер — телеграм может лежать, раздача от этого не встаёт.
 import { sendMessage, getUpdates } from '../adapters/telegram.js';
+import { logTeamChange } from './teams.js';
 
 const BACKOFF_SEC = [0, 30, 120, 600, 3600];
 const nowIso = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -98,8 +99,33 @@ export async function flushNotifications(db, { limit = 20, send = sendMessage } 
   return { picked: rows.length, sent, failed };
 }
 
-const GREETING = 'Готово — вы подписаны на уведомления по лидам.\n'
-  + 'Сюда будут приходить компании, назначенные вашей команде, со ссылками на карточки.';
+const ASK_LOGIN = 'Здравствуйте! Это бот уведомлений по лидам.\n'
+  + 'Пришлите одним сообщением ваш логин в Аргусе — по нему я пойму, из какой вы команды.';
+const BOUND = (name, team) => `Готово, ${name}. Вы в команде «${team}».\n`
+  + 'Сюда будут приходить компании, назначенные команде, со ссылками на карточки.';
+const NOT_FOUND = 'Такого логина в списке команд нет. Проверьте написание или напишите руководителю — '
+  + 'возможно, вас ещё не добавили в команду.';
+
+/**
+ * Человек прислал логин Аргуса — привязываем его чат к участнику команды.
+ * Так руководителю не нужно вручную переносить chat id из списка в карточку.
+ */
+export function bindByLogin(db, chatId, text) {
+  const login = String(text ?? '').trim();
+  if (!login || login.startsWith('/')) return null;
+
+  const member = db.prepare(`
+    SELECT m.*, t.name team_name FROM team_members m JOIN teams t ON t.id = m.team_id
+    WHERE lower(trim(m.argus_user_id)) = lower(?) LIMIT 1`).get(login);
+  if (!member) return { ok: false };
+
+  db.prepare("UPDATE team_members SET telegram_chat_id = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(String(chatId), member.id);
+  logTeamChange(db, member.team_id, 'member_changed', {
+    argus_user_id: member.argus_user_id, telegram_bound: String(chatId), by: 'сам через бота',
+  });
+  return { ok: true, member };
+}
 
 /**
  * Забрать новые сообщения боту, запомнить, кто написал, и поздороваться.
@@ -125,14 +151,26 @@ export async function collectContacts(db, { fetch: fetchUpdates = getUpdates, se
                   username = excluded.username, last_seen = datetime('now')`)
       .run(String(chat.id), name, from.username || null);
 
-    // Здороваемся один раз: человек должен понимать, что нажатие сработало.
-    if (!known) {
-      added++;
-      try { await send(String(chat.id), GREETING); } catch { /* заблокировал бота — не беда */ }
+    const text = u.message?.text || '';
+    const reply = answerFor(db, chat.id, text, known);
+    if (!known) added++;
+    if (reply) {
+      try { await send(String(chat.id), reply); } catch { /* заблокировал бота — не беда */ }
     }
   }
   db.prepare('UPDATE tg_state SET last_update_id = ? WHERE id = 1').run(maxId);
   return { seen: updates.length, added };
+}
+
+// Что ответить человеку: просим логин, а на логин — подтверждаем команду.
+function answerFor(db, chatId, text, known) {
+  const clean = String(text || '').trim();
+  if (!clean || clean.startsWith('/')) return known ? null : ASK_LOGIN;
+
+  const bound = bindByLogin(db, chatId, clean);
+  if (!bound) return null;
+  if (!bound.ok) return NOT_FOUND;
+  return BOUND(bound.member.name || bound.member.argus_user_id, bound.member.team_name);
 }
 
 /** Кто написал боту и ещё не привязан ни к кому. */
