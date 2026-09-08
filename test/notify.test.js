@@ -123,7 +123,7 @@ test('кто написал боту — запоминается у нас, а 
   assert.equal(list.find((c) => c.chat_id === '5').name, 'Азиз Турдиев');
 });
 
-test('человек прислал логин Аргуса — привязался сам, без руководителя', async () => {
+test('человек прислал ID Аргуса — привязался сам, без руководителя', async () => {
   const db = setup();
   addMember(db, 1, { argus_user_id: 'aziztur', name: 'Азиз Турдиев' });
 
@@ -138,18 +138,18 @@ test('человек прислал логин Аргуса — привязал
 
   const member = db.prepare("SELECT * FROM team_members WHERE argus_user_id = 'aziztur'").get();
   assert.equal(member.telegram_chat_id, '55', 'регистр и пробелы в логине не мешают');
-  assert.match(sent[0], /логин в Аргусе/, 'на «Старт» просим логин');
+  assert.match(sent[0], /ID в Аргусе/, 'на «Старт» просим ID');
   assert.match(sent[1], /Команда 1/, 'подтверждаем команду, чтобы человек видел результат');
 });
 
-test('незнакомый логин — говорим прямо, а не молчим', async () => {
+test('незнакомый ID — говорим прямо, а не молчим', async () => {
   const db = setup();
   const sent = [];
   await collectContacts(db, {
     fetch: async () => [{ update_id: 1, message: { from: { id: 55 }, chat: { id: 55 }, text: 'кто-то-левый' } }],
     send: async (chat, text) => sent.push(text),
   });
-  assert.match(sent[0], /Такого логина в списке команд нет/);
+  assert.match(sent[0], /Такого ID в списке команд нет/);
   assert.equal(db.prepare('SELECT COUNT(*) c FROM team_members WHERE telegram_chat_id IS NOT NULL').get().c, 0);
 });
 
@@ -195,4 +195,34 @@ test('сообщения от других ботов в контакты не �
   });
   assert.equal(out.added, 0);
   assert.equal(knownContacts(db).length, 0);
+});
+
+test('одинаковый отказ подряд не шлём: человек перебирает варианты, а не читает стену', async () => {
+  const db = setup();
+  const sent = [];
+  const send = async (chat, text) => sent.push(text);
+  const upd = (id, text) => ({ update_id: id, message: { from: { id: 5, first_name: 'Кто-то' }, chat: { id: 5 }, text } });
+
+  await collectContacts(db, { fetch: async () => [upd(1, '/start')], send });
+  await collectContacts(db, { fetch: async () => [upd(2, 'mail@example.com')], send });
+  await collectContacts(db, { fetch: async () => [upd(3, 'qwerty2801')], send });
+  await collectContacts(db, { fetch: async () => [upd(4, 'ещё попытка')], send });
+
+  assert.equal(sent.length, 2, 'приветствие и один отказ, дальше молчим');
+  assert.match(sent[0], /ID в Аргусе/);
+  assert.match(sent[1], /Такого ID в списке команд нет/);
+});
+
+test('после отказов верный ID всё равно принимается', async () => {
+  const db = setup();
+  addMember(db, 1, { argus_user_id: 'aziztur', name: 'Азиз' });
+  const sent = [];
+  const send = async (chat, text) => sent.push(text);
+  const upd = (id, text) => ({ update_id: id, message: { from: { id: 5 }, chat: { id: 5 }, text } });
+
+  await collectContacts(db, { fetch: async () => [upd(1, 'ерунда')], send });
+  await collectContacts(db, { fetch: async () => [upd(2, 'aziztur')], send });
+
+  assert.equal(db.prepare("SELECT telegram_chat_id t FROM team_members WHERE argus_user_id='aziztur'").get().t, '5');
+  assert.match(sent[sent.length - 1], /Команда 1/);
 });

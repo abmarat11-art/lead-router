@@ -19,6 +19,7 @@ export function migrate(db) {
   // Колонки добавляем отдельно: ALTER TABLE не умеет IF NOT EXISTS,
   // а migrate() выполняется на каждом старте.
   addColumn(db, 'team_members', 'telegram_chat_id', 'TEXT');
+  addColumn(db, 'tg_contacts', 'last_reply', 'TEXT');
   return db;
 }
 

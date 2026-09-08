@@ -99,12 +99,17 @@ export async function flushNotifications(db, { limit = 20, send = sendMessage } 
   return { picked: rows.length, sent, failed };
 }
 
-const ASK_LOGIN = 'Здравствуйте! Это бот уведомлений по лидам.\n'
-  + 'Пришлите одним сообщением ваш логин в Аргусе — по нему я пойму, из какой вы команды.';
+const ASK_LOGIN = 'Здравствуйте! Это бот уведомлений по лидам.\n\n'
+  + 'Пришлите одним сообщением ваш ID в Аргусе — он на вашей странице сотрудника, '
+  + 'рядом есть кнопка «скопировать». Выглядит как короткое имя (например tagirsol) '
+  + 'или длинный код через дефисы.\n\n'
+  + 'Пароль и почту присылать не нужно.';
 const BOUND = (name, team) => `Готово, ${name}. Вы в команде «${team}».\n`
   + 'Сюда будут приходить компании, назначенные команде, со ссылками на карточки.';
-const NOT_FOUND = 'Такого логина в списке команд нет. Проверьте написание или напишите руководителю — '
-  + 'возможно, вас ещё не добавили в команду.';
+const NOT_FOUND = 'Такого ID в списке команд нет.\n\n'
+  + 'Нужен именно ID сотрудника из Аргуса — не почта и не пароль. '
+  + 'Откройте свою страницу сотрудника в Аргусе и скопируйте ID кнопкой.\n'
+  + 'Если ID верный — напишите руководителю, возможно вас ещё не добавили в команду.';
 
 /**
  * Человек прислал логин Аргуса — привязываем его чат к участнику команды.
@@ -154,15 +159,24 @@ export async function collectContacts(db, { fetch: fetchUpdates = getUpdates, se
     const text = u.message?.text || '';
     const reply = answerFor(db, chat.id, text, known);
     if (!known) added++;
-    if (reply) {
+    // Один и тот же ответ подряд не шлём: человек перебирает варианты,
+    // а получает стену одинаковых сообщений.
+    if (reply && reply !== lastReplyTo(db, chat.id)) {
       try { await send(String(chat.id), reply); } catch { /* заблокировал бота — не беда */ }
+      rememberReply(db, chat.id, reply);
     }
   }
   db.prepare('UPDATE tg_state SET last_update_id = ? WHERE id = 1').run(maxId);
   return { seen: updates.length, added };
 }
 
-// Что ответить человеку: просим логин, а на логин — подтверждаем команду.
+const lastReplyTo = (db, chatId) =>
+  db.prepare('SELECT last_reply FROM tg_contacts WHERE chat_id = ?').get(String(chatId))?.last_reply ?? null;
+
+const rememberReply = (db, chatId, reply) =>
+  db.prepare('UPDATE tg_contacts SET last_reply = ? WHERE chat_id = ?').run(reply, String(chatId));
+
+// Что ответить человеку: просим ID, а на верный ID — подтверждаем команду.
 function answerFor(db, chatId, text, known) {
   const clean = String(text || '').trim();
   if (!clean || clean.startsWith('/')) return known ? null : ASK_LOGIN;
