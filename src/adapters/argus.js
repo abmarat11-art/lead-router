@@ -61,6 +61,8 @@ async function call(method, body = {}, { fetchImpl = fetch, retries = 1 } = {}) 
 
 const digits = (s) => String(s ?? '').replace(/\D/g, '');
 
+const isUnknownReference = (err) => /справочник/i.test(String(err.message || ''));
+
 // ОКЭД приходит из Б24 как «14120 - Производство спецодежды», а Аргус ждёт код.
 export const okedCode = (raw) => {
   const match = String(raw ?? '').trim().match(/^\d+/);
@@ -109,7 +111,16 @@ export async function createCompany(company, placement = {}, opts = {}) {
 
   Object.assign(fields, placementFields(placement));
 
-  const result = await call('companies.add', { fields }, opts);
+  let result;
+  try {
+    result = await call('companies.add', { fields }, opts);
+  } catch (err) {
+    // Справочник ОКЭД в Аргусе неполный: кода из Б24 в нём может не быть.
+    // Компанию из-за этого не теряем — заводим без кода, дозаполнят руками.
+    if (!fields.OKED || !isUnknownReference(err)) throw err;
+    delete fields.OKED;
+    result = await call('companies.add', { fields }, opts);
+  }
   const id = result?.ID ?? result?.id ?? (typeof result === 'string' ? result : null);
   if (!id) throw new Error('Аргус companies.add не вернул ID компании');
   return String(id);

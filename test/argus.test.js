@@ -178,3 +178,29 @@ test('409 по ИНН на создании: находим компанию и 
   assert.deepEqual(res, { id: 'baa1dbcb', created: false });
   assert.equal(updated.fields.ASSIGNED_BY_ID, 'user-4');
 });
+
+test('неизвестный ОКЭД не хоронит компанию — заводим без кода', async () => {
+  const bodies = [];
+  const id = await createCompany(COMPANY, { assignedById: 'u1' }, {
+    fetchImpl: async (url, init) => {
+      const body = JSON.parse(init.body);
+      bodies.push(body);
+      if (bodies.length === 1) {
+        return { ok: false, status: 400, json: async () => ({ error: 'BAD_REQUEST', error_description: 'в справочнике нет значения «14120»' }) };
+      }
+      return ok({ ID: 'new-1' });
+    },
+  });
+  assert.equal(id, 'new-1');
+  assert.equal(bodies[0].fields.OKED, '14120', 'сначала пробуем с кодом');
+  assert.equal(bodies[1].fields.OKED, undefined, 'потом без него');
+  assert.equal(bodies[1].fields.ASSIGNED_BY_ID, 'u1', 'ответственный при этом не теряется');
+});
+
+test('прочие ошибки создания не заминаются повтором', async () => {
+  let calls = 0;
+  await assert.rejects(() => createCompany(COMPANY, {}, {
+    fetchImpl: async () => { calls++; return fail('BAD_REQUEST', 'TITLE обязателен'); },
+  }), /TITLE обязателен/);
+  assert.equal(calls, 1);
+});
