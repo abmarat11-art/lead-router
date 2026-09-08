@@ -11,7 +11,7 @@ import { flushSheetWrites, sheetReadonly } from './core/sheetWriter.js';
 import { getConfig } from './core/columns.js';
 import { enrichPending } from './core/enrichment.js';
 import { deliverPending } from './core/argusDelivery.js';
-import { flushNotifications } from './core/notify.js';
+import { flushNotifications, collectContacts } from './core/notify.js';
 
 loadEnv();
 
@@ -71,6 +71,8 @@ every(10_000, async () => {
   if (process.env.TELEGRAM_BOT_TOKEN) {
     const tg = await flushNotifications(db);
     if (tg.picked) log('уведомления', JSON.stringify(tg));
+    const contacts = await collectContacts(db);
+    if (contacts.added) log(`боту написали новых людей: ${contacts.added}`);
   }
 });
 

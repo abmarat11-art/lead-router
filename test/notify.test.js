@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openMigrated } from '../src/db/index.js';
 import { addMember } from '../src/core/teams.js';
-import { enqueueAssignment, flushNotifications, buildText, companyLinks } from '../src/core/notify.js';
+import { enqueueAssignment, flushNotifications, buildText, companyLinks, collectContacts, knownContacts } from '../src/core/notify.js';
 
 function setup() {
   const db = openMigrated(':memory:');
@@ -102,4 +102,59 @@ test('успешная отправка помечается и больше н�
 
   const second = await flushNotifications(db, { send: async () => { throw new Error('не должно вызываться'); } });
   assert.equal(second.picked, 0);
+});
+
+test('кто написал боту — запоминается у нас, а не живёт сутки в телеграме', async () => {
+  const db = setup();
+  const sent = [];
+  const updates = [
+    { update_id: 10, message: { from: { id: 5, first_name: 'Азиз', last_name: 'Турдиев', username: 'aziz' }, chat: { id: 5 } } },
+    { update_id: 11, message: { from: { id: 7, first_name: 'Тагир' }, chat: { id: 7 } } },
+  ];
+  const out = await collectContacts(db, {
+    fetch: async () => updates,
+    send: async (chat, text) => sent.push({ chat, text }),
+  });
+  assert.deepEqual(out, { seen: 2, added: 2 });
+  assert.equal(sent.length, 2, 'человеку подтверждаем, что нажатие сработало');
+
+  const list = knownContacts(db);
+  assert.deepEqual(list.map((c) => c.chat_id).sort(), ['5', '7']);
+  assert.equal(list.find((c) => c.chat_id === '5').name, 'Азиз Турдиев');
+});
+
+test('повторный проход не здоровается заново и двигает курсор', async () => {
+  const db = setup();
+  const upd = [{ update_id: 10, message: { from: { id: 5, first_name: 'Азиз' }, chat: { id: 5 } } }];
+  let offset = null;
+  await collectContacts(db, { fetch: async () => upd, send: async () => {} });
+
+  let greeted = 0;
+  const second = await collectContacts(db, {
+    fetch: async (o) => { offset = o; return upd; },
+    send: async () => { greeted++; },
+  });
+  assert.equal(offset, 11, 'просим только то, чего ещё не видели');
+  assert.equal(second.added, 0);
+  assert.equal(greeted, 0, 'второе «здравствуйте» — спам');
+});
+
+test('в списке видно, кому chat id уже привязан', async () => {
+  const db = setup();
+  await collectContacts(db, {
+    fetch: async () => [{ update_id: 1, message: { from: { id: 111, first_name: 'Костя' }, chat: { id: 111 } } }],
+    send: async () => {},
+  });
+  addMember(db, 1, { argus_user_id: 'u1', name: 'Константин Ю', telegram_chat_id: '111' });
+  assert.equal(knownContacts(db)[0].bound_to, 'Константин Ю');
+});
+
+test('сообщения от других ботов в контакты не попадают', async () => {
+  const db = setup();
+  const out = await collectContacts(db, {
+    fetch: async () => [{ update_id: 1, message: { from: { id: 9, first_name: 'Бот', is_bot: true }, chat: { id: 9 } } }],
+    send: async () => {},
+  });
+  assert.equal(out.added, 0);
+  assert.equal(knownContacts(db).length, 0);
 });

@@ -73,22 +73,11 @@ export function createHandler(db, { importNow } = {}) {
         }
       }
 
-      // Кто написал боту: чтобы привязать человека, не выспрашивая у него chat_id.
+      // Кто написал боту: копится своей таблицей, а не живёт сутки в телеграме.
       if (req.method === 'GET' && p === '/api/telegram/contacts') {
-        const { getUpdates } = await import('../adapters/telegram.js');
-        const updates = await getUpdates();
-        const seen = new Map();
-        for (const u of updates) {
-          const from = u.message?.from || u.my_chat_member?.from;
-          const chat = u.message?.chat || u.my_chat_member?.chat;
-          if (!from || !chat) continue;
-          seen.set(String(chat.id), {
-            chat_id: String(chat.id),
-            name: [from.first_name, from.last_name].filter(Boolean).join(' '),
-            username: from.username || null,
-          });
-        }
-        return json(res, 200, [...seen.values()]);
+        const { collectContacts, knownContacts } = await import('../core/notify.js');
+        if (process.env.TELEGRAM_BOT_TOKEN) await collectContacts(db).catch(() => {});
+        return json(res, 200, knownContacts(db));
       }
 
       // Проверка связи: шлём человеку тестовое сообщение.

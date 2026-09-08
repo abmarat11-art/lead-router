@@ -1,6 +1,6 @@
 // Уведомления команде о назначении: получателю и всем, кто в списке уведомлений.
 // Пишем в очередь, отправляет воркер — телеграм может лежать, раздача от этого не встаёт.
-import { sendMessage } from '../adapters/telegram.js';
+import { sendMessage, getUpdates } from '../adapters/telegram.js';
 
 const BACKOFF_SEC = [0, 30, 120, 600, 3600];
 const nowIso = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -96,4 +96,50 @@ export async function flushNotifications(db, { limit = 20, send = sendMessage } 
     }
   }
   return { picked: rows.length, sent, failed };
+}
+
+const GREETING = 'Готово — вы подписаны на уведомления по лидам.\n'
+  + 'Сюда будут приходить компании, назначенные вашей команде, со ссылками на карточки.';
+
+/**
+ * Забрать новые сообщения боту, запомнить, кто написал, и поздороваться.
+ * Копим у себя, потому что телеграм держит непрочитанное только сутки:
+ * человек нажал «Старт» в пятницу — в понедельник его уже не найти.
+ */
+export async function collectContacts(db, { fetch: fetchUpdates = getUpdates, send = sendMessage } = {}) {
+  const state = db.prepare('SELECT last_update_id FROM tg_state WHERE id = 1').get();
+  const updates = await fetchUpdates((state?.last_update_id || 0) + 1);
+  if (!updates.length) return { seen: 0, added: 0 };
+
+  let added = 0, maxId = state?.last_update_id || 0;
+  for (const u of updates) {
+    maxId = Math.max(maxId, u.update_id || 0);
+    const from = u.message?.from || u.my_chat_member?.from;
+    const chat = u.message?.chat || u.my_chat_member?.chat;
+    if (!from || !chat || from.is_bot) continue;
+
+    const name = [from.first_name, from.last_name].filter(Boolean).join(' ') || null;
+    const known = db.prepare('SELECT 1 FROM tg_contacts WHERE chat_id = ?').get(String(chat.id));
+    db.prepare(`INSERT INTO tg_contacts (chat_id, name, username) VALUES (?, ?, ?)
+                ON CONFLICT(chat_id) DO UPDATE SET name = excluded.name,
+                  username = excluded.username, last_seen = datetime('now')`)
+      .run(String(chat.id), name, from.username || null);
+
+    // Здороваемся один раз: человек должен понимать, что нажатие сработало.
+    if (!known) {
+      added++;
+      try { await send(String(chat.id), GREETING); } catch { /* заблокировал бота — не беда */ }
+    }
+  }
+  db.prepare('UPDATE tg_state SET last_update_id = ? WHERE id = 1').run(maxId);
+  return { seen: updates.length, added };
+}
+
+/** Кто написал боту и ещё не привязан ни к кому. */
+export function knownContacts(db) {
+  return db.prepare(`
+    SELECT c.*, (
+      SELECT m.name FROM team_members m WHERE m.telegram_chat_id = c.chat_id LIMIT 1
+    ) AS bound_to
+    FROM tg_contacts c ORDER BY c.last_seen DESC`).all();
 }

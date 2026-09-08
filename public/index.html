@@ -305,10 +305,11 @@ async function whoWrote() {
   box.innerHTML = '<p class="dim">Спрашиваю у телеграма…</p>';
   const list = await api('/api/telegram/contacts');
   if (list.error) return box.innerHTML = `<p class="dim">${esc(list.error)}</p>`;
-  if (!list.length) return box.innerHTML = '<p class="dim">Боту никто не писал. Попроси человека нажать «Старт».</p>';
-  box.innerHTML = '<table><tr><th>Кто</th><th>chat id</th></tr>' + list.map(c =>
-    `<tr><td>${esc(c.name)}${c.username ? ' @' + esc(c.username) : ''}</td>
-         <td><code>${esc(c.chat_id)}</code></td></tr>`).join('') + '</table>';
+  if (!list.length) return box.innerHTML = '<p class="dim">Боту никто не писал. Попроси человека открыть @lidgen_CP_bot и нажать «Старт».</p>';
+  box.innerHTML = '<table><tr><th>Кто</th><th>chat id</th><th>Привязан</th></tr>' + list.map(c =>
+    `<tr><td>${esc(c.name || '')}${c.username ? ' @' + esc(c.username) : ''}</td>
+         <td><code>${esc(c.chat_id)}</code></td>
+         <td>${c.bound_to ? esc(c.bound_to) : '<span class="dim">никому</span>'}</td></tr>`).join('') + '</table>';
 }
 
 async function createMember() {
