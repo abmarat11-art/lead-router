@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { findCompanyByInn, createCompany, ensureCompany, assignCompany, okedCode } from '../src/adapters/argus.js';
+import { findCompanyByInn, createCompany, ensureCompany, assignCompany, placementFields, okedCode } from '../src/adapters/argus.js';
 
 const COMPANY = {
   b24_id: '4021',
@@ -216,4 +216,50 @@ test('фродовая компания в Аргус не уезжает', asyn
   }
   assert.deepEqual(pending(db).map((l) => l.id), [1, 5],
     'закрытая компания не должна появиться в СРМ — удалить её оттуда нечем');
+});
+
+test('список уведомляемых уезжает вместе с назначением', async () => {
+  let sent = null;
+  await createCompany(COMPANY, { assignedById: 'aziztur', kind: 'lead', notifyIds: ['vladimirpak', 'maratabd'] }, {
+    fetchImpl: async (url, init) => { sent = JSON.parse(init.body); return ok({ ID: 'x' }); },
+  });
+  assert.deepEqual(sent.fields.NOTIFY_USER_IDS, ['vladimirpak', 'maratabd']);
+  assert.equal(sent.fields.ASSIGNED_BY_ID, 'aziztur');
+});
+
+test('получателя в список уведомляемых не дублируем', async () => {
+  let sent = null;
+  await createCompany(COMPANY, { assignedById: 'aziztur', notifyIds: ['AzizTur', 'vladimirpak', 'vladimirpak'] }, {
+    fetchImpl: async (url, init) => { sent = JSON.parse(init.body); return ok({ ID: 'x' }); },
+  });
+  assert.deepEqual(sent.fields.NOTIFY_USER_IDS, ['vladimirpak'], 'своё уведомление назначенный получает и так');
+});
+
+test('без назначения список уведомляемых не шлём: Аргус ответит 400', () => {
+  assert.deepEqual(placementFields({ notifyIds: ['maratabd'] }), {});
+});
+
+test('неизвестный человек в списке уведомлений не держит лид', async () => {
+  const bodies = [];
+  const id = await createCompany(COMPANY, { assignedById: 'aziztur', notifyIds: ['petrov'] }, {
+    fetchImpl: async (url, init) => {
+      bodies.push(JSON.parse(init.body));
+      if (bodies.length === 1) {
+        return { ok: false, status: 400, json: async () => ({
+          error: 'BAD_REQUEST', error_description: 'такого сотрудника нет в этом направлении: petrov' }) };
+      }
+      return ok({ ID: 'new-2' });
+    },
+  });
+  assert.equal(id, 'new-2');
+  assert.equal(bodies[1].fields.NOTIFY_USER_IDS, undefined, 'уведомление отбрасываем');
+  assert.equal(bodies[1].fields.ASSIGNED_BY_ID, 'aziztur', 'назначение остаётся');
+});
+
+test('неизвестный получатель — повтора нет, строка честно падает', async () => {
+  let calls = 0;
+  await assert.rejects(() => createCompany(COMPANY, { assignedById: 'petrov', notifyIds: ['maratabd'] }, {
+    fetchImpl: async () => { calls++; return fail('BAD_REQUEST', 'такого сотрудника нет в этом направлении: petrov'); },
+  }), /petrov/);
+  assert.equal(calls, 1, 'без получателя компания не нужна вовсе');
 });

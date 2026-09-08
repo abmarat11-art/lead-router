@@ -58,9 +58,15 @@ export async function deliverPending(db, { limit = 20, ensure } = {}) {
       }
       const company = lead.b24_snapshot ? JSON.parse(lead.b24_snapshot) : companyFromRow(lead);
 
+      const notifyIds = db.prepare(`
+        SELECT argus_user_id FROM team_members
+        WHERE team_id = ? AND active = 1 AND role != 'assignee'`).all(lead.assigned_team)
+        .map((m) => m.argus_user_id);
+
       const { id, created } = await ensureCompany(company, {
         assignedById: lead.argus_user_id,
         kind: lead.kind,
+        notifyIds,
       });
 
       db.prepare(`UPDATE leads SET argus_state = 'sent', argus_attempts = ?, argus_error = NULL,

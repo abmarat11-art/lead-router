@@ -10,7 +10,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const RATE_LIMIT_PAUSE_MS = 2000;   // потолок 60 запросов в минуту на ключ
 
 const DEFAULT_FIELDS = {
-  fields: { assignedBy: 'ASSIGNED_BY_ID', kind: 'LEAD_TYPE' },
+  fields: { assignedBy: 'ASSIGNED_BY_ID', kind: 'LEAD_TYPE', notify: 'NOTIFY_USER_IDS' },
   // Поле-список: у подписи («Лид») админ может поменять текст, ключ — нет.
   kindValues: { lead: 'lead', meeting: 'meeting' },
 };
@@ -63,6 +63,17 @@ const digits = (s) => String(s ?? '').replace(/\D/g, '');
 
 const isUnknownReference = (err) => /справочник/i.test(String(err.message || ''));
 
+// Аргус называет виноватого в тексте: «такого сотрудника нет в этом направлении: petrov».
+// Если это кто-то из списка уведомлений, а не сам получатель — лид важнее уведомления.
+function blamesNotifyOnly(err, fields, notifyKey, assignedKey) {
+  const text = String(err.message || '').toLowerCase();
+  if (!/сотрудник/.test(text)) return false;
+  const assigned = String(fields[assignedKey] ?? '').toLowerCase();
+  if (assigned && text.includes(assigned)) return false;
+  const list = [].concat(fields[notifyKey] ?? []).map((v) => String(v).toLowerCase());
+  return list.some((id) => text.includes(id));
+}
+
 // ОКЭД приходит из Б24 как «14120 - Производство спецодежды», а Аргус ждёт код.
 export const okedCode = (raw) => {
   const match = String(raw ?? '').trim().match(/^\d+/);
@@ -111,15 +122,22 @@ export async function createCompany(company, placement = {}, opts = {}) {
 
   Object.assign(fields, placementFields(placement));
 
+  const { fields: names } = argusFields();
   let result;
   try {
     result = await call('companies.add', { fields }, opts);
   } catch (err) {
     // Справочник ОКЭД в Аргусе неполный: кода из Б24 в нём может не быть.
     // Компанию из-за этого не теряем — заводим без кода, дозаполнят руками.
-    if (!fields.OKED || !isUnknownReference(err)) throw err;
-    delete fields.OKED;
-    result = await call('companies.add', { fields }, opts);
+    if (fields.OKED && isUnknownReference(err)) {
+      delete fields.OKED;
+      result = await call('companies.add', { fields }, opts);
+    } else if (blamesNotifyOnly(err, fields, names.notify, names.assignedBy)) {
+      // Кто-то из списка уведомлений неизвестен Аргусу — лид всё равно должен доехать.
+      delete fields[names.notify];
+      result = await call('companies.add', { fields }, opts);
+      result = { ...result, notifyDropped: String(err.message || err) };
+    } else throw err;
   }
   const id = result?.ID ?? result?.id ?? (typeof result === 'string' ? result : null);
   if (!id) throw new Error('Аргус companies.add не вернул ID компании');
@@ -132,6 +150,13 @@ export function placementFields(placement = {}) {
   const out = {};
   if (placement.assignedById) out[names.assignedBy] = placement.assignedById;
   if (placement.kind && kindValues[placement.kind]) out[names.kind] = kindValues[placement.kind];
+
+  // Список уведомляемых — добавка к назначению, без него Аргус ответит 400.
+  // Получателя в список не кладём: своё уведомление он получает и так.
+  const notify = (placement.notifyIds || [])
+    .map((id) => String(id ?? '').trim())
+    .filter((id) => id && id.toLowerCase() !== String(placement.assignedById ?? '').trim().toLowerCase());
+  if (placement.assignedById && notify.length) out[names.notify] = [...new Set(notify)];
   return out;
 }
 

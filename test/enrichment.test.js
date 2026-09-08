@@ -84,7 +84,7 @@ test('компания уезжает в Аргус на ответственн�
   });
   assert.deepEqual(res, { picked: 1, sent: 1, failed: 0 });
   assert.equal(calls[0].company.inn, '301234567');
-  assert.deepEqual(calls[0].placement, { assignedById: 'user-1', kind: 'lead' });
+  assert.deepEqual(calls[0].placement, { assignedById: 'user-1', kind: 'lead', notifyIds: [] });
 
   const lead = db.prepare('SELECT * FROM leads').get();
   assert.equal(lead.argus_state, 'sent');
