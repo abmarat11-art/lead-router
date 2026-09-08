@@ -229,12 +229,15 @@ async function renderTeam() {
 }
 
 function membersTable(members) {
-  return `<table><tr><th>Имя</th><th>publicId в Аргусе</th><th>Назначать сюда</th><th>Активен</th><th></th></tr>` +
+  return `<table><tr><th>Имя</th><th>publicId в Аргусе</th><th>Телеграм</th><th>Назначать сюда</th><th>Активен</th><th></th></tr>` +
     members.map(m => `<tr>
       <td><input value="${esc(m.name || '')}" placeholder="имя"
             onchange="patchMember(${m.id},{name:this.value||null})" style="width:150px"></td>
       <td><input value="${esc(m.argus_user_id)}"
             onchange="patchMember(${m.id},{argus_user_id:this.value})" style="width:220px"></td>
+      <td><input value="${esc(m.telegram_chat_id || '')}" placeholder="chat id"
+            onchange="patchMember(${m.id},{telegram_chat_id:this.value||null})" style="width:120px">
+          ${m.telegram_chat_id ? `<button class="ghost" onclick="testTg('${esc(m.telegram_chat_id)}')">Проверить</button>` : ''}</td>
       <td><input type="radio" name="assignee" ${m.role === 'assignee' ? 'checked' : ''}
             onchange="patchMember(${m.id},{role:'assignee'})"
             title="компания заводится в Аргусе на этого человека"></td>
@@ -247,10 +250,15 @@ function membersTable(members) {
      <div class="row-actions">
        <input id="m-name" placeholder="имя">
        <input id="m-id" placeholder="publicId (uuid) в Аргусе" style="width:260px">
+       <input id="m-tg" placeholder="chat id в телеграме" style="width:150px">
        <button class="act" onclick="createMember()">Добавить</button>
+       <button class="ghost" onclick="whoWrote()">Кто написал боту</button>
      </div>
      <p class="dim">Назначение уходит на отмеченного точкой. Остальные получают уведомления;
-        отметить «принять» или «фрод» может любой из них.</p>`;
+        отметить «принять» или «фрод» может любой из них.</p>
+     <p class="dim">Чтобы человеку приходили уведомления, он должен один раз написать боту «Старт» —
+        телеграм не даёт ботам писать первыми. После этого его видно по кнопке «Кто написал боту».</p>
+     <div id="tg-contacts"></div>`;
 }
 
 const HISTORY_RU = {
@@ -275,11 +283,28 @@ const patchMember = (id, patch) =>
 const dropMember = (id) =>
   fetch(`/api/teams/${openTeamId}/members/${id}`, { method: 'DELETE' }).then(renderTeam);
 
+async function testTg(chatId) {
+  const res = await api('/api/telegram/test', 'POST', { chat_id: chatId });
+  toast(res.ok ? 'сообщение ушло' : (res.error || 'не отправилось'), res.ok ? 'ok' : 'bad');
+}
+
+async function whoWrote() {
+  const box = document.getElementById('tg-contacts');
+  box.innerHTML = '<p class="dim">Спрашиваю у телеграма…</p>';
+  const list = await api('/api/telegram/contacts');
+  if (list.error) return box.innerHTML = `<p class="dim">${esc(list.error)}</p>`;
+  if (!list.length) return box.innerHTML = '<p class="dim">Боту никто не писал. Попроси человека нажать «Старт».</p>';
+  box.innerHTML = '<table><tr><th>Кто</th><th>chat id</th></tr>' + list.map(c =>
+    `<tr><td>${esc(c.name)}${c.username ? ' @' + esc(c.username) : ''}</td>
+         <td><code>${esc(c.chat_id)}</code></td></tr>`).join('') + '</table>';
+}
+
 async function createMember() {
   const argus_user_id = document.getElementById('m-id').value.trim();
   if (!argus_user_id) return toast('нужен id пользователя в Аргусе', 'bad');
   const res = await api(`/api/teams/${openTeamId}/members`, 'POST', {
     argus_user_id, name: document.getElementById('m-name').value.trim() || null,
+    telegram_chat_id: document.getElementById('m-tg').value.trim() || null,
   });
   if (res.error) return toast(res.error, 'bad');
   renderTeam();

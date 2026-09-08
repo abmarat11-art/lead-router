@@ -11,6 +11,7 @@ import { flushSheetWrites, sheetReadonly } from './core/sheetWriter.js';
 import { getConfig } from './core/columns.js';
 import { enrichPending } from './core/enrichment.js';
 import { deliverPending } from './core/argusDelivery.js';
+import { flushNotifications } from './core/notify.js';
 
 loadEnv();
 
@@ -66,6 +67,10 @@ every(10_000, async () => {
   if (process.env.SHEETS_SPREADSHEET_ID) {
     const sheet = await flushSheetWrites(db);
     if (sheet.picked) log('sheet', JSON.stringify(sheet));
+  }
+  if (process.env.TELEGRAM_BOT_TOKEN) {
+    const tg = await flushNotifications(db);
+    if (tg.picked) log('уведомления', JSON.stringify(tg));
   }
 });
 

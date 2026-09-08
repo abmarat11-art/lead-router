@@ -15,7 +15,16 @@ export function openDb(path = process.env.DB_PATH || join(ROOT, 'data', 'lead-ro
 
 export function migrate(db) {
   db.exec(readFileSync(join(ROOT, 'migrations', '001_init.sql'), 'utf8'));
+  db.exec(readFileSync(join(ROOT, 'migrations', '002_telegram.sql'), 'utf8'));
+  // Колонки добавляем отдельно: ALTER TABLE не умеет IF NOT EXISTS,
+  // а migrate() выполняется на каждом старте.
+  addColumn(db, 'team_members', 'telegram_chat_id', 'TEXT');
   return db;
+}
+
+function addColumn(db, table, column, type) {
+  const has = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+  if (!has) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
 
 export function openMigrated(path) {

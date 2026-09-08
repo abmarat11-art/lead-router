@@ -1,0 +1,105 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { openMigrated } from '../src/db/index.js';
+import { addMember } from '../src/core/teams.js';
+import { enqueueAssignment, flushNotifications, buildText, companyLinks } from '../src/core/notify.js';
+
+function setup() {
+  const db = openMigrated(':memory:');
+  db.prepare('INSERT INTO teams (id, name, queue_order) VALUES (1, ?, 1)').run('Команда 1');
+  db.prepare(`INSERT INTO leads (id, source_key, source_hash, company, kind, lead_gen,
+              assigned_team, b24_company_id, argus_company_id)
+              VALUES (1, 'Лист1:3', 'h', 'ООО Ромашка', 'meeting', 'Тагир', 1, '4021', 'arg-77')`).run();
+  return db;
+}
+
+test('уведомления уходят получателю и списку, минуя непривязанных', () => {
+  const db = setup();
+  addMember(db, 1, { argus_user_id: 'u1', name: 'Ойбек', role: 'assignee', telegram_chat_id: '111' });
+  addMember(db, 1, { argus_user_id: 'u2', name: 'Костя', telegram_chat_id: '222' });
+  addMember(db, 1, { argus_user_id: 'u3', name: 'Без телеграма' });
+
+  const out = enqueueAssignment(db, 1, 1);
+  assert.deepEqual(out, { queued: 2, skipped: 1 });
+
+  const rows = db.prepare('SELECT * FROM tg_outbox ORDER BY id').all();
+  assert.match(rows[0].text, /Вам назначено/, 'получателю — что компания на нём');
+  assert.match(rows[1].text, /для информации/, 'остальным — к сведению');
+});
+
+test('выключенный участник уведомлений не получает', () => {
+  const db = setup();
+  const id = addMember(db, 1, { argus_user_id: 'u1', telegram_chat_id: '111' });
+  db.prepare('UPDATE team_members SET active = 0 WHERE id = ?').run(id);
+  assert.deepEqual(enqueueAssignment(db, 1, 1), { queued: 0, skipped: 0 });
+});
+
+test('повторный проход не задваивает уведомление', () => {
+  const db = setup();
+  addMember(db, 1, { argus_user_id: 'u1', telegram_chat_id: '111' });
+  enqueueAssignment(db, 1, 1);
+  enqueueAssignment(db, 1, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM tg_outbox').get().c, 1);
+});
+
+test('в тексте обе ссылки на карточки', () => {
+  process.env.ARGUS_COMPANY_URL = 'https://crm-mvp.cloudplus.uz/companies/{id}';
+  process.env.B24_COMPANY_URL = 'https://acrm.site/crm/company/details/{id}/';
+  const lead = { company: 'ООО Ромашка', kind: 'lead', argus_company_id: 'arg-77', b24_company_id: '4021' };
+  const links = companyLinks(lead);
+  assert.equal(links.length, 2);
+  assert.match(links[0], /companies\/arg-77/);
+  assert.match(links[1], /company\/details\/4021/);
+  delete process.env.ARGUS_COMPANY_URL;
+  delete process.env.B24_COMPANY_URL;
+});
+
+test('без настроенных адресов ссылки просто не добавляются', () => {
+  const text = buildText({ company: 'ООО Ромашка', kind: 'lead' }, { name: 'Команда 1' }, { forAssignee: true });
+  assert.match(text, /ООО Ромашка/);
+  assert.doesNotMatch(text, /href/);
+});
+
+test('угловые скобки в названии не ломают разметку', () => {
+  const text = buildText({ company: 'ООО <Ромашка>', kind: 'lead' }, { name: 'К1' }, { forAssignee: false });
+  assert.match(text, /&lt;Ромашка&gt;/);
+});
+
+test('человек не нажал «Старт» — повторов нет, ошибка видна', async () => {
+  const db = setup();
+  addMember(db, 1, { argus_user_id: 'u1', telegram_chat_id: '111' });
+  enqueueAssignment(db, 1, 1);
+
+  const out = await flushNotifications(db, {
+    send: async () => { const e = new Error('Телеграм: bot was blocked by the user'); e.code = 403; throw e; },
+  });
+  assert.deepEqual(out, { picked: 1, sent: 0, failed: 1 });
+  const row = db.prepare('SELECT * FROM tg_outbox WHERE id = 1').get();
+  assert.equal(row.state, 'failed', 'бесконечно долбиться в закрытую дверь незачем');
+  assert.match(row.last_error, /blocked/);
+});
+
+test('сетевой сбой — повтор позже, не потеря', async () => {
+  const db = setup();
+  addMember(db, 1, { argus_user_id: 'u1', telegram_chat_id: '111' });
+  enqueueAssignment(db, 1, 1);
+
+  await flushNotifications(db, { send: async () => { throw new Error('ECONNRESET'); } });
+  const row = db.prepare('SELECT * FROM tg_outbox WHERE id = 1').get();
+  assert.equal(row.state, 'pending');
+  assert.equal(row.attempts, 1);
+});
+
+test('успешная отправка помечается и больше не берётся', async () => {
+  const db = setup();
+  addMember(db, 1, { argus_user_id: 'u1', telegram_chat_id: '111' });
+  enqueueAssignment(db, 1, 1);
+
+  const seen = [];
+  const first = await flushNotifications(db, { send: async (chat, text) => seen.push({ chat, text }) });
+  assert.deepEqual(first, { picked: 1, sent: 1, failed: 0 });
+  assert.equal(seen[0].chat, '111');
+
+  const second = await flushNotifications(db, { send: async () => { throw new Error('не должно вызываться'); } });
+  assert.equal(second.picked, 0);
+});

@@ -1,3 +1,4 @@
+import { enqueueAssignment } from './notify.js';
 // Компания уехала в Аргус уже назначенной: заводим её на ответственного той команды,
 // которой очередь отдала строку, и сразу указываем тип — лид или встреча.
 // Компания с таким ИНН уже есть — берём её, дубль не плодим.
@@ -65,6 +66,10 @@ export async function deliverPending(db, { limit = 20, ensure } = {}) {
         .run(attempts, id, nowIso(), lead.id);
       logEvent(db, lead.id, lead.assigned_team, created ? 'argus_company_created' : 'argus_company_matched',
         { argus_company_id: id, assigned_by: lead.argus_user_id, kind: lead.kind });
+
+      // Уведомляем только теперь: до этого нет id компании, а значит и ссылки на карточку.
+      const notified = enqueueAssignment(db, lead.id, lead.assigned_team);
+      if (notified.queued) logEvent(db, lead.id, lead.assigned_team, 'notify_queued', notified);
       sent++;
     } catch (err) {
       failed++;

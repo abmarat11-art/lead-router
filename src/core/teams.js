@@ -35,15 +35,16 @@ function reviveTeamDelivery(db, teamId) {
   if (revived) logTeamChange(db, teamId, 'delivery_retried', { revived });
 }
 
-export function addMember(db, teamId, { argus_user_id, name = null, role = 'notify' }) {
+export function addMember(db, teamId, { argus_user_id, name = null, role = 'notify', telegram_chat_id = null }) {
   if (!argus_user_id) throw new Error('нужен id пользователя в Аргусе');
   if (role === 'assignee') demoteAssignees(db, teamId);
 
   const info = db.prepare(
-    'INSERT INTO team_members (team_id, argus_user_id, name, role) VALUES (?, ?, ?, ?)'
-  ).run(teamId, String(argus_user_id).trim(), name, role);
+    'INSERT INTO team_members (team_id, argus_user_id, name, role, telegram_chat_id) VALUES (?, ?, ?, ?, ?)'
+  ).run(teamId, String(argus_user_id).trim(), name, role,
+    telegram_chat_id ? String(telegram_chat_id).trim() : null);
 
-  logTeamChange(db, teamId, 'member_added', { argus_user_id, name, role });
+  logTeamChange(db, teamId, 'member_added', { argus_user_id, name, role, telegram_chat_id });
   reviveTeamDelivery(db, teamId);
   return Number(info.lastInsertRowid);
 }
@@ -58,7 +59,7 @@ export function updateMember(db, teamId, memberId, patch) {
   const fields = [];
   const values = [];
   for (const [k, v] of Object.entries(patch)) {
-    if (!['argus_user_id', 'name', 'role', 'active'].includes(k)) continue;
+    if (!['argus_user_id', 'name', 'role', 'active', 'telegram_chat_id'].includes(k)) continue;
     fields.push(`${k} = ?`);
     values.push(v);
   }
@@ -70,8 +71,8 @@ export function updateMember(db, teamId, memberId, patch) {
   const after = db.prepare('SELECT * FROM team_members WHERE id = ?').get(memberId);
   logTeamChange(db, teamId, 'member_changed', {
     argus_user_id: after.argus_user_id,
-    was: { role: before.role, active: before.active, argus_user_id: before.argus_user_id },
-    now: { role: after.role, active: after.active, argus_user_id: after.argus_user_id },
+    was: { role: before.role, active: before.active, argus_user_id: before.argus_user_id, telegram_chat_id: before.telegram_chat_id },
+    now: { role: after.role, active: after.active, argus_user_id: after.argus_user_id, telegram_chat_id: after.telegram_chat_id },
   });
   reviveTeamDelivery(db, teamId);
   return after;

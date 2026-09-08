@@ -72,6 +72,36 @@ export function createHandler(db, { importNow } = {}) {
         }
       }
 
+      // Кто написал боту: чтобы привязать человека, не выспрашивая у него chat_id.
+      if (req.method === 'GET' && p === '/api/telegram/contacts') {
+        const { getUpdates } = await import('../adapters/telegram.js');
+        const updates = await getUpdates();
+        const seen = new Map();
+        for (const u of updates) {
+          const from = u.message?.from || u.my_chat_member?.from;
+          const chat = u.message?.chat || u.my_chat_member?.chat;
+          if (!from || !chat) continue;
+          seen.set(String(chat.id), {
+            chat_id: String(chat.id),
+            name: [from.first_name, from.last_name].filter(Boolean).join(' '),
+            username: from.username || null,
+          });
+        }
+        return json(res, 200, [...seen.values()]);
+      }
+
+      // Проверка связи: шлём человеку тестовое сообщение.
+      if (req.method === 'POST' && p === '/api/telegram/test') {
+        const { chat_id } = await readJson(req);
+        const { sendMessage } = await import('../adapters/telegram.js');
+        try {
+          await sendMessage(chat_id, 'Проверка связи: уведомления по лидам будут приходить сюда.');
+          return json(res, 200, { ok: true });
+        } catch (err) {
+          return json(res, 200, { ok: false, error: String(err.message || err) });
+        }
+      }
+
       if (req.method === 'GET' && seg[1] === 'teams' && seg[3] === 'history') {
         return json(res, 200, teamHistory(db, Number(seg[2])));
       }
