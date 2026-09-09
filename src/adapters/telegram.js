@@ -4,7 +4,7 @@ const API = 'https://api.telegram.org';
 
 export const telegramEnabled = () => Boolean(process.env.TELEGRAM_BOT_TOKEN);
 
-export async function sendMessage(chatId, text, { fetchImpl = fetch } = {}) {
+export async function sendMessage(chatId, text, { fetchImpl = fetch, replyMarkup } = {}) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error('TELEGRAM_BOT_TOKEN не задан');
 
@@ -16,6 +16,7 @@ export async function sendMessage(chatId, text, { fetchImpl = fetch } = {}) {
       text,
       parse_mode: 'HTML',
       disable_web_page_preview: true,
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
     }),
   });
   const data = await res.json().catch(() => ({}));
@@ -35,4 +36,22 @@ export async function getUpdates(offset = 0, { fetchImpl = fetch } = {}) {
   const res = await fetchImpl(`${API}/bot${token}/getUpdates?offset=${offset}&timeout=0`);
   const data = await res.json().catch(() => ({}));
   return data.ok ? data.result : [];
+}
+
+/**
+ * Кнопка «Фидбэк» в меню бота — свободный отзыв без привязки к компании.
+ * Ставится один раз при старте: телеграм помнит её сам.
+ */
+export async function setMenuButton(url, { fetchImpl = fetch } = {}) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token || !url) return false;
+  const res = await fetchImpl(`${API}/bot${token}/setChatMenuButton`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      menu_button: { type: 'web_app', text: 'Фидбэк', web_app: { url } },
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  return Boolean(data.ok);
 }

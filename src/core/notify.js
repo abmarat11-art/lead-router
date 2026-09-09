@@ -42,6 +42,16 @@ export function buildText(lead, team, { forAssignee }) {
 }
 
 /**
+ * Кнопка «Оставить фидбэк» под уведомлением: открывает мини-апп с уже
+ * подставленной компанией. Без MINIAPP_URL кнопки просто нет — текст уходит как раньше.
+ */
+export function feedbackButton(leadId, { base = process.env.MINIAPP_URL } = {}) {
+  if (!base || !leadId) return undefined;
+  const url = `${String(base).replace(/\/$/, '')}/feedback.html?lead=${leadId}`;
+  return { inline_keyboard: [[{ text: '💬 Оставить фидбэк', web_app: { url } }]] };
+}
+
+/**
  * Поставить уведомления в очередь: получателю — «вам назначено», остальным активным — к сведению.
  * Повторно по той же строке и тому же человеку не ставим: воркер мог только упасть, а не задвоить.
  */
@@ -82,7 +92,7 @@ export async function flushNotifications(db, { limit = 20, send = sendMessage } 
   for (const row of rows) {
     const attempts = row.attempts + 1;
     try {
-      await send(row.chat_id, row.text);
+      await send(row.chat_id, row.text, { replyMarkup: feedbackButton(row.lead_id) });
       db.prepare("UPDATE tg_outbox SET state = 'sent', attempts = ?, sent_at = ?, last_error = NULL WHERE id = ?")
         .run(attempts, nowIso(), row.id);
       sent++;

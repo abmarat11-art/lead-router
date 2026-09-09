@@ -12,6 +12,7 @@ import { getConfig } from './core/columns.js';
 import { enrichPending } from './core/enrichment.js';
 import { deliverPending } from './core/argusDelivery.js';
 import { flushNotifications, collectContacts } from './core/notify.js';
+import { setMenuButton } from './adapters/telegram.js';
 
 loadEnv();
 
@@ -37,6 +38,15 @@ const server = createServer(withAuth(createHandler(db, { importNow })));
 log(authEnabled() ? `вход по логину: ${process.env.AUTH_USER}` : 'вход открыт (AUTH_USER не задан)');
 const port = Number(process.env.PORT) || 3000;
 server.listen(port, () => log(`lead-router на http://localhost:${port}`));
+
+// Кнопка «Фидбэк» в меню бота — свободный отзыв без привязки к компании.
+if (process.env.TELEGRAM_BOT_TOKEN && process.env.MINIAPP_URL) {
+  const url = `${process.env.MINIAPP_URL.replace(/\/$/, '')}/feedback.html`;
+  setMenuButton(url).then((ok) => log(ok ? `кнопка фидбэка в меню бота: ${url}` : 'кнопку меню поставить не вышло'))
+    .catch((err) => log('кнопка меню:', err.message));
+} else if (process.env.TELEGRAM_BOT_TOKEN) {
+  log('MINIAPP_URL не задан — фидбэк из телеграма выключен');
+}
 
 // --- фоновые циклы ---
 // опрос таблицы раз в минуту: новые строки в очередь, статусы из СРМ обратно к нам

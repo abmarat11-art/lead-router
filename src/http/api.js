@@ -13,6 +13,7 @@ import {
   listMembers, teamHistory, addMember, updateMember, removeMember, logTeamChange,
   renameTeam,
 } from '../core/teams.js';
+import { verifyInitData, identify, leadContext, addFeedback, listFeedback } from '../core/feedback.js';
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
@@ -33,6 +34,7 @@ export function createHandler(db, { importNow } = {}) {
     const url = new URL(req.url, 'http://localhost');
     const p = url.pathname;
     const seg = p.split('/').filter(Boolean);
+    let miniBody = null;   // тело POST мини-аппа: читается один раз, дальше переиспользуем
 
     try {
       if (p === '/health') return json(res, 200, { ok: true });
@@ -71,6 +73,37 @@ export function createHandler(db, { importNow } = {}) {
         if (req.method === 'DELETE' && seg[4]) {
           return json(res, 200, removeMember(db, teamId, Number(seg[4])));
         }
+      }
+
+
+      // ---- мини-апп фидбэка (телеграм) ----
+      // Входа по кукам тут нет: человека подтверждает подпись телеграма в initData.
+      if (p.startsWith('/api/miniapp/')) {
+        const initData = req.headers['x-telegram-init-data']
+          || (req.method === 'GET' ? url.searchParams.get('initData') : null);
+        const who = identify(db, verifyInitData(
+          initData ?? (req.method === 'POST' ? (miniBody = await readJson(req)).initData : null)));
+        if (!who) return json(res, 403, { error: 'Вас нет в списке команд — фидбэк принять не могу' });
+
+        if (req.method === 'GET' && p === '/api/miniapp/context') {
+          return json(res, 200, {
+            author: who.name, team: who.member.team_name,
+            lead: leadContext(db, url.searchParams.get('lead')),
+          });
+        }
+        if (req.method === 'POST' && p === '/api/miniapp/feedback') {
+          const b = miniBody ?? await readJson(req);
+          try {
+            return json(res, 200, { ok: true, ...addFeedback(db, { who, leadId: b.lead_id, text: b.text }) });
+          } catch (err) {
+            return json(res, 400, { error: String(err.message || err) });
+          }
+        }
+        return json(res, 404, { error: 'not found' });
+      }
+
+      if (req.method === 'GET' && p === '/api/feedback') {
+        return json(res, 200, listFeedback(db));
       }
 
       // Кто написал боту: копится своей таблицей, а не живёт сутки в телеграме.

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Фидбэк по лидогенерации</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 15px/1.45 -apple-system, system-ui, sans-serif; margin: 0; padding: 16px;
+    background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #111);
+  }
+  h1 { font-size: 17px; margin: 0 0 12px; }
+  .lead {
+    background: var(--tg-theme-secondary-bg-color, #f2f2f7);
+    border-radius: 10px; padding: 10px 12px; margin-bottom: 12px;
+  }
+  .lead b { display: block; font-size: 15px; }
+  .dim { color: var(--tg-theme-hint-color, #8a8a8e); font-size: 13px; }
+  textarea {
+    width: 100%; box-sizing: border-box; min-height: 140px; padding: 10px;
+    font: inherit; border-radius: 10px; resize: vertical;
+    border: 1px solid var(--tg-theme-hint-color, #c7c7cc);
+    background: var(--tg-theme-bg-color, #fff); color: inherit;
+  }
+  .msg { margin-top: 12px; }
+  .bad { color: #d13c3c; }
+  .ok { color: #2e9e57; }
+</style>
+</head>
+<body>
+<h1 id="title">Фидбэк по лидогенерации</h1>
+<div id="head"></div>
+<textarea id="text" placeholder="Замечание или предложение по этому лиду" autofocus></textarea>
+<div class="msg dim" id="msg">Загружаю…</div>
+
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand();
+
+const leadId = new URLSearchParams(location.search).get('lead');
+const initData = tg?.initData || '';
+const esc = (s) => String(s ?? '').replace(/[<>&]/g, c => ({ '<':'&lt;','>':'&gt;','&':'&amp;' }[c]));
+const say = (text, kind = 'dim') => {
+  const el = document.getElementById('msg');
+  el.className = 'msg ' + kind;
+  el.textContent = text;
+};
+const KIND_RU = { lead: 'лид', meeting: 'встреча' };
+let ready = false;
+
+async function boot() {
+  if (!initData) return say('Откройте эту форму кнопкой в боте — иначе я не знаю, кто пишет.', 'bad');
+  const res = await fetch('/api/miniapp/context' + (leadId ? '?lead=' + encodeURIComponent(leadId) : ''), {
+    headers: { 'x-telegram-init-data': initData },
+  });
+  const d = await res.json().catch(() => ({}));
+  if (d.error) return say(d.error, 'bad');
+
+  if (d.lead) {
+    document.getElementById('head').innerHTML =
+      `<div class="lead"><b>${esc(d.lead.company)}</b>
+       <span class="dim">${esc(KIND_RU[d.lead.kind] || d.lead.kind || '')}`
+      + `${d.lead.lead_gen ? ' · лидоген ' + esc(d.lead.lead_gen) : ''}`
+      + `${d.lead.team_name ? ' · ' + esc(d.lead.team_name) : ''}</span></div>`;
+  } else if (leadId) {
+    say('Такой компании у меня нет — напишу фидбэк без привязки.', 'dim');
+  } else {
+    document.getElementById('text').placeholder = 'Замечание или предложение по лидогенерации';
+  }
+  say(`${d.author}${d.team ? ', ' + d.team : ''}`);
+  ready = true;
+  tg?.MainButton.setText('Отправить').show().onClick(send);
+}
+
+async function send() {
+  if (!ready) return;
+  const text = document.getElementById('text').value.trim();
+  if (!text) return say('Напишите текст — пустой фидбэк отправлять нечего.', 'bad');
+
+  tg?.MainButton.showProgress();
+  try {
+    const res = await fetch('/api/miniapp/feedback', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-telegram-init-data': initData },
+      body: JSON.stringify({ lead_id: d_lead(), text }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (d.error) { say(d.error, 'bad'); return; }
+    say('Отправлено, спасибо.', 'ok');
+    tg?.HapticFeedback?.notificationOccurred('success');
+    setTimeout(() => tg?.close(), 700);
+  } catch (err) {
+    say('Не ушло: ' + err.message, 'bad');
+  } finally {
+    tg?.MainButton.hideProgress();
+  }
+}
+const d_lead = () => (document.querySelector('.lead') ? Number(leadId) : null);
+
+document.getElementById('text').addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') send();
+});
+boot();
+</script>
+</body>
+</html>

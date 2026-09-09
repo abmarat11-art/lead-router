@@ -16,6 +16,7 @@ export function openDb(path = process.env.DB_PATH || join(ROOT, 'data', 'lead-ro
 export function migrate(db) {
   db.exec(readFileSync(join(ROOT, 'migrations', '001_init.sql'), 'utf8'));
   db.exec(readFileSync(join(ROOT, 'migrations', '002_telegram.sql'), 'utf8'));
+  db.exec(readFileSync(join(ROOT, 'migrations', '003_feedback.sql'), 'utf8'));
   // Колонки добавляем отдельно: ALTER TABLE не умеет IF NOT EXISTS,
   // а migrate() выполняется на каждом старте.
   addColumn(db, 'team_members', 'telegram_chat_id', 'TEXT');

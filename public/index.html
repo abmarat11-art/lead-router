@@ -23,7 +23,7 @@
 <div id="modal" onclick="if(event.target.id==='modal') closeTeam()"><div class="box" id="modal-box"></div></div>
 <main id="view">загрузка…</main>
 <script>
-const TABS = [['new','Пул'],['assigned','Назначены'],['in_work','В работе'],['rejected','Отказы'],['quarantine','Карантин'],['escalated','Эскалация'],['queues','Очереди'],['teams','Команды']];
+const TABS = [['new','Пул'],['assigned','Назначены'],['in_work','В работе'],['rejected','Отказы'],['quarantine','Карантин'],['escalated','Эскалация'],['queues','Очереди'],['teams','Команды'],['feedback','Фидбэк']];
 const KIND_RU = { lead: 'лид', meeting: 'встреча' };
 let tab = 'new', teams = [], queues = [], data = [], st = {};
 
@@ -99,7 +99,9 @@ const age = (hours) => {
 
 async function load() {
   [st, teams, queues] = await Promise.all([api('/api/stats'), api('/api/teams'), api('/api/queues')]);
-  data = ['teams', 'queues'].includes(tab) ? [] : await api('/api/leads?status=' + tab);
+  data = ['teams', 'queues'].includes(tab) ? []
+    : tab === 'feedback' ? await api('/api/feedback')
+    : await api('/api/leads?status=' + tab);
   render();
 }
 
@@ -112,7 +114,10 @@ function render() {
   document.getElementById('nav').innerHTML = TABS.map(([k, t]) =>
     `<button class="${k === tab ? 'on' : ''}" onclick="tab='${k}';load()">${t}</button>`).join('');
   document.getElementById('view').innerHTML =
-    tab === 'teams' ? renderTeams() : tab === 'queues' ? renderQueues() : renderLeads();
+    tab === 'teams' ? renderTeams()
+    : tab === 'queues' ? renderQueues()
+    : tab === 'feedback' ? renderFeedback()
+    : renderLeads();
 }
 
 function toggle(id, enabled, why) {
@@ -125,6 +130,20 @@ function toggle(id, enabled, why) {
 const counters = () => `<div class="cards">${
   Object.entries(st.leads || {}).map(([k, v]) => `<div class="card"><b>${v}</b><span>${k}</span></div>`).join('')
 }</div>`;
+
+// Фидбэк из мини-аппа: по лиду и свободный. Свободный — без ссылки на компанию.
+function renderFeedback() {
+  if (!data.length) return '<p class="dim">Фидбэка пока нет. Он приходит из бота: '
+    + 'кнопка под уведомлением или «Фидбэк» в меню бота.</p>';
+  return `<table><tr><th>Когда</th><th>Кто</th><th>Команда</th><th>Компания</th><th>Текст</th></tr>` +
+    data.map(f => `<tr>
+      <td>${when(f.created_at)}</td>
+      <td>${esc(f.author)}</td>
+      <td>${esc(f.team_name || '')}</td>
+      <td>${f.company ? esc(f.company) : '<span class="dim">без привязки</span>'}</td>
+      <td>${esc(f.text).replace(/\n/g, '<br>')}</td>
+    </tr>`).join('') + '</table>';
+}
 
 function renderLeads() {
   if (!data.length) return counters() + '<p class="dim">Пусто.</p>';
