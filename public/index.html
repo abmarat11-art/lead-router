@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Контур распределения лидов</title>
-<link rel="stylesheet" href="/app.css?v=5">
+<link rel="stylesheet" href="/app.css?v=6">
 </head>
 <body>
 <header>
@@ -20,12 +20,13 @@
   <button class="ghost" onclick="fetch('/api/logout').then(()=>location.href='/login.html')">Выйти</button>
 </header>
 <div id="toast"></div>
-<div id="modal" onclick="if(event.target.id==='modal') closeTeam()"><div class="box" id="modal-box"></div></div>
+<div id="modal" onclick="if(event.target.id==='modal') closeModal()"><div class="box" id="modal-box"></div></div>
 <main id="view">загрузка…</main>
 <script>
 const TABS = [['new','Пул'],['assigned','Назначены'],['in_work','В работе'],['rejected','Отказы'],['quarantine','Карантин'],['escalated','Эскалация'],['queues','Очереди'],['teams','Команды'],['feedback','Фидбэк']];
 const KIND_RU = { lead: 'лид', meeting: 'встреча' };
 let tab = 'new', teams = [], queues = [], data = [], st = {};
+let pendingFeedback = null;
 
 const api = (url, method = 'GET', body) =>
   fetch(url, { method, headers: { 'content-type': 'application/json' }, body: body && JSON.stringify(body) })
@@ -97,12 +98,22 @@ const age = (hours) => {
   return `висит ${Math.floor(hours / 24)} дн`;
 };
 
+// Ссылка вида /#feedback/12 открывает карточку сразу — ею и делятся.
+function openFromHash() {
+  const m = location.hash.match(/^#feedback\/(\d+)$/);
+  if (m) { tab = 'feedback'; return Number(m[1]); }
+  return null;
+}
+
 async function load() {
   [st, teams, queues] = await Promise.all([api('/api/stats'), api('/api/teams'), api('/api/queues')]);
+  const wanted = pendingFeedback;
+  pendingFeedback = null;
   data = ['teams', 'queues'].includes(tab) ? []
     : tab === 'feedback' ? await api('/api/feedback')
     : await api('/api/leads?status=' + tab);
   render();
+  if (wanted) openFeedback(wanted);
 }
 
 function render() {
@@ -135,14 +146,57 @@ const counters = () => `<div class="cards">${
 function renderFeedback() {
   if (!data.length) return '<p class="dim">Фидбэка пока нет. Он приходит из бота: '
     + 'кнопка под уведомлением или «Фидбэк» в меню бота.</p>';
-  return `<table><tr><th>Когда</th><th>Кто</th><th>Команда</th><th>Компания</th><th>Текст</th></tr>` +
+  return `<table><tr><th>Когда</th><th>Кто</th><th>Команда</th><th>Компания</th><th>Текст</th><th></th></tr>` +
     data.map(f => `<tr>
       <td>${when(f.created_at)}</td>
       <td>${esc(f.author)}</td>
       <td>${esc(f.team_name || '')}</td>
       <td>${f.company ? esc(f.company) : '<span class="dim">без привязки</span>'}</td>
-      <td>${esc(f.text).replace(/\n/g, '<br>')}</td>
+      <td class="cut" onclick="openFeedback(${f.id})" title="открыть карточку">${esc(f.text).replace(/\n/g, '<br>')}</td>
+      <td><button class="ghost" onclick="openFeedback(${f.id})">Карточка</button></td>
     </tr>`).join('') + '</table>';
+}
+
+// ---- карточка фидбэка: ссылки на компанию и постоянный адрес, которым делятся ----
+async function openFeedback(id) {
+  const f = data.find(x => x.id === id) || await api('/api/feedback/' + id);
+  if (!f || f.error) return toast(f?.error || 'фидбэк не найден', 'bad');
+
+  const link = location.origin + '/#feedback/' + f.id;
+  const links = [
+    f.b24_url ? `<a href="${f.b24_url}" target="_blank" rel="noopener">Карточка в Б24</a>` : '',
+    f.argus_url ? `<a href="${f.argus_url}" target="_blank" rel="noopener">Карточка в Аргусе</a>` : '',
+  ].filter(Boolean).join(' · ');
+
+  document.getElementById('modal-box').innerHTML = `
+    <button class="ghost close" onclick="closeFeedback()">Закрыть</button>
+    <h2>Фидбэк №${f.id}</h2>
+    <div class="dim">${esc(f.author)}${f.team_name ? ' · ' + esc(f.team_name) : ''} · ${f.created_at} UTC</div>
+    ${f.company
+      ? `<p><b>${esc(f.company)}</b>${f.lead_gen ? ` <span class="dim">· лидоген ${esc(f.lead_gen)}</span>` : ''}</p>
+         <p>${links || '<span class="dim">компания ещё не заведена в СРМ — ссылок нет</span>'}</p>`
+      : '<p class="dim">Без привязки к компании — общий фидбэк по лидогенерации.</p>'}
+    <p class="fb-text">${esc(f.text).replace(/\n/g, '<br>')}</p>
+    <div class="row-actions">
+      <input id="fb-link" value="${link}" readonly onclick="this.select()">
+      <button class="act" onclick="copyLink()">Скопировать ссылку</button>
+    </div>
+    <p class="dim">По этой ссылке карточка откроется сразу — можно кинуть в чат тому, у кого есть доступ.</p>`;
+  document.getElementById('modal').classList.add('on');
+  location.hash = 'feedback/' + f.id;
+}
+
+function closeFeedback() {
+  document.getElementById('modal').classList.remove('on');
+  if (location.hash.startsWith('#feedback/')) history.replaceState(null, '', location.pathname);
+}
+
+function copyLink() {
+  const input = document.getElementById('fb-link');
+  input.select();
+  navigator.clipboard.writeText(input.value)
+    .then(() => toast('ссылка скопирована'))
+    .catch(() => toast('не вышло скопировать — выделите и скопируйте руками', 'bad'));
 }
 
 function renderLeads() {
@@ -223,6 +277,8 @@ async function renameTeam(id, patch) {
   toast('сохранено');
   load();
 }
+
+const closeModal = () => (openTeamId ? closeTeam() : closeFeedback());
 
 // ---- карточка команды: состав и история ----
 let openTeamId = null, teamTab = 'members';
@@ -342,8 +398,14 @@ async function createMember() {
   renderTeam();
 }
 
+pendingFeedback = openFromHash();
 load();
 setInterval(load, 15000);
+// ссылку открыли, когда страница уже была открыта
+window.addEventListener('hashchange', () => {
+  const id = openFromHash();
+  if (id) openFeedback(id);
+});
 </script>
 </body>
 </html>

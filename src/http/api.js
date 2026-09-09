@@ -13,7 +13,7 @@ import {
   listMembers, teamHistory, addMember, updateMember, removeMember, logTeamChange,
   renameTeam,
 } from '../core/teams.js';
-import { verifyInitData, identify, leadContext, addFeedback, listFeedback } from '../core/feedback.js';
+import { verifyInitData, identify, leadContext, addFeedback, listFeedback, getFeedback } from '../core/feedback.js';
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
@@ -104,6 +104,12 @@ export function createHandler(db, { importNow } = {}) {
 
       if (req.method === 'GET' && p === '/api/feedback') {
         return json(res, 200, listFeedback(db));
+      }
+
+      // Отдельный фидбэк по ссылке: список отдаёт только последние 200.
+      if (req.method === 'GET' && seg[1] === 'feedback' && seg[2]) {
+        const one = getFeedback(db, seg[2]);
+        return one ? json(res, 200, one) : json(res, 404, { error: 'фидбэк не найден' });
       }
 
       // Кто написал боту: копится своей таблицей, а не живёт сутки в телеграме.

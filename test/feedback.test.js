@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { openMigrated } from '../src/db/index.js';
 import { addMember } from '../src/core/teams.js';
-import { verifyInitData, identify, leadContext, addFeedback, listFeedback } from '../src/core/feedback.js';
+import { verifyInitData, identify, leadContext, addFeedback, listFeedback, getFeedback } from '../src/core/feedback.js';
 import { feedbackButton } from '../src/core/notify.js';
 
 const TOKEN = '123456:TEST-TOKEN';
@@ -87,4 +87,27 @@ test('кнопка под уведомлением ведёт в мини-апп
   assert.equal(markup.inline_keyboard[0][0].web_app.url, 'https://lidgen.at-km.net/feedback.html?lead=7');
   assert.equal(feedbackButton(7, { base: '' }), undefined, 'без MINIAPP_URL кнопки нет');
   assert.equal(feedbackButton(null, { base: 'https://x' }), undefined);
+});
+
+test('карточка фидбэка несёт ссылки на компанию в Б24 и Аргусе', () => {
+  const db = setup();
+  db.prepare("UPDATE leads SET b24_company_id = '3094401', argus_company_id = 'arg-77' WHERE id = 1").run();
+  const who = identify(db, USER);
+  const { id } = addFeedback(db, { who, leadId: 1, text: 'клиент просил созвон после 10-го' });
+
+  process.env.B24_COMPANY_URL = 'https://acrm.site/crm/company/details/{id}/';
+  process.env.ARGUS_COMPANY_URL = 'https://crm-mvp.cloudplus.uz/companies/{id}';
+  const card = getFeedback(db, id);
+  assert.equal(card.b24_url, 'https://acrm.site/crm/company/details/3094401/');
+  assert.equal(card.argus_url, 'https://crm-mvp.cloudplus.uz/companies/arg-77');
+  assert.equal(card.company, 'BIZOAT NEFT');
+
+  // свободный фидбэк ссылок не получает — компании нет
+  const free = getFeedback(db, addFeedback(db, { who, text: 'общее замечание' }).id);
+  assert.equal(free.b24_url, null);
+  assert.equal(free.argus_url, null);
+});
+
+test('фидбэка с таким номером нет — карточка не выдумывается', () => {
+  assert.equal(getFeedback(setup(), 999), null);
 });

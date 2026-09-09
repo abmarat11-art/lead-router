@@ -88,3 +88,9 @@ button:disabled { opacity:.45; cursor:not-allowed; box-shadow:none; }
 /* Модалки: содержимое подстраивается под ширину окна, без горизонтального скролла */
 #modal .box table { table-layout:auto; }
 #modal .box table input[type=text], #modal .box table input:not([type]) { width:100%; min-width:0; box-sizing:border-box; }
+
+/* Фидбэк: длинный текст в списке подрезаем, целиком — в карточке. */
+td.cut { max-width:520px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; }
+.fb-text { white-space:pre-wrap; background:var(--card); border-left:3px solid var(--gold);
+           padding:8px 12px; margin:12px 0; }
+#fb-link { width:320px; }

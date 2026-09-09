@@ -24,6 +24,7 @@
     border: 1px solid var(--tg-theme-hint-color, #c7c7cc);
     background: var(--tg-theme-bg-color, #fff); color: inherit;
   }
+  .hint { margin-top: 6px; font-size: 12px; }
   .msg { margin-top: 12px; }
   .bad { color: #d13c3c; }
   .ok { color: #2e9e57; }
@@ -33,6 +34,7 @@
 <h1 id="title">Фидбэк по лидогенерации</h1>
 <div id="head"></div>
 <textarea id="text" placeholder="Замечание или предложение по этому лиду" autofocus></textarea>
+<div class="hint dim">Enter — отправить, Shift+Enter — новая строка</div>
 <div class="msg dim" id="msg">Загружаю…</div>
 
 <script>
@@ -99,8 +101,13 @@ async function send() {
 }
 const d_lead = () => (document.querySelector('.lead') ? Number(leadId) : null);
 
+// Enter отправляет — так быстрее в переписке; перенос строки остаётся на Shift+Enter.
+// e.isComposing — не перебиваем набор иероглифов и голосовой ввод.
 document.getElementById('text').addEventListener('keydown', (e) => {
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') send();
+  if (e.key !== 'Enter' || e.isComposing) return;
+  if (e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  send();
 });
 boot();
 </script>

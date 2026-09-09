@@ -75,11 +75,29 @@ export function addFeedback(db, { who, leadId = null, text }) {
   return { id: Number(info.lastInsertRowid), lead_id: lead ? lead.id : null };
 }
 
+const SELECT_FEEDBACK = `
+  SELECT f.*, l.company, l.kind, l.lead_gen, l.b24_company_id, l.argus_company_id, t.name team_name
+  FROM feedback f
+  LEFT JOIN leads l ON l.id = f.lead_id
+  LEFT JOIN teams t ON t.id = f.team_id`;
+
 export function listFeedback(db, { limit = 200 } = {}) {
-  return db.prepare(`
-    SELECT f.*, l.company, l.kind, l.lead_gen, t.name team_name
-    FROM feedback f
-    LEFT JOIN leads l ON l.id = f.lead_id
-    LEFT JOIN teams t ON t.id = f.team_id
-    ORDER BY f.id DESC LIMIT ?`).all(limit);
+  return db.prepare(`${SELECT_FEEDBACK} ORDER BY f.id DESC LIMIT ?`).all(limit).map(withLinks);
+}
+
+/** Один фидбэк по ссылке, которой поделились. */
+export function getFeedback(db, id) {
+  const row = db.prepare(`${SELECT_FEEDBACK} WHERE f.id = ?`).get(Number(id));
+  return row ? withLinks(row) : null;
+}
+
+// Ссылки на карточки компании считаем на сервере: шаблоны живут в .env, а не в браузере.
+function withLinks(row) {
+  const b24 = process.env.B24_COMPANY_URL;
+  const argus = process.env.ARGUS_COMPANY_URL;
+  return {
+    ...row,
+    b24_url: b24 && row.b24_company_id ? b24.replace('{id}', row.b24_company_id) : null,
+    argus_url: argus && row.argus_company_id ? argus.replace('{id}', row.argus_company_id) : null,
+  };
 }
