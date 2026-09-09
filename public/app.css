@@ -4,16 +4,16 @@
   --th:#eef8f6;          /* шапки таблиц */
 
   /* золото: ровный тон, глянец даём бликом, а не переливом */
-  --gold:#C6A46A;
-  --gold-dark:#A88145;
-  --gold-fill: linear-gradient(180deg, #E4C68C 0%, #C6A46A 52%, #AC8A4E 100%);
+  --gold:#D9BE8E;
+  --gold-dark:#BB9A63;
+  --gold-fill: linear-gradient(180deg, #F2DFB6 0%, #D9BE8E 52%, #C19F6A 100%);
   --gloss: inset 0 1px 1px rgba(255,255,255,.45), 0 2px 4px rgba(0,0,0,.15);
 
-  --line:#C6A46A;
-  --line-soft:#E5D3AC;   /* тонкие разделители внутри таблиц */
+  --line:#D9BE8E;
+  --line-soft:#EDE1C6;   /* тонкие разделители внутри таблиц */
   --text:#5E4A22;        /* тёмное золото: читается на светлом */
   --dim:#8E7845;
-  --acc:#C6A46A;
+  --acc:#D9BE8E;
   --acc-ink:#3b2c06;     /* текст на золотой кнопке */
   --ok:#1f7a5c; --warn:#a9781a; --bad:#a8323f;
 }
@@ -46,7 +46,7 @@ tr:last-child td { border-bottom:0; }
 .tag { display:inline-block; padding:1px 7px; border-radius:20px; font-size:12px;
        background:var(--th); color:var(--dim); border:1px solid var(--line-soft); }
 .tag.new { background:#e2f2f7; color:#1f5f7a; border-color:#a9cfdc }
-.tag.assigned { background:#faf1d8; color:var(--warn); border-color:var(--gold) }
+.tag.assigned { background:#fdf7e6; color:var(--warn); border-color:var(--gold) }
 .tag.in_work { background:#e0f2ea; color:var(--ok); border-color:#8fc7b2 }
 .tag.escalated,.tag.quarantine,.tag.rejected { background:#fae7e9; color:var(--bad); border-color:#d99aa2 }
 .cards { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
