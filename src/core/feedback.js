@@ -82,22 +82,72 @@ const SELECT_FEEDBACK = `
   LEFT JOIN teams t ON t.id = f.team_id`;
 
 export function listFeedback(db, { limit = 200 } = {}) {
-  return db.prepare(`${SELECT_FEEDBACK} ORDER BY f.id DESC LIMIT ?`).all(limit).map(withLinks);
+  return db.prepare(`${SELECT_FEEDBACK} ORDER BY f.id DESC LIMIT ?`).all(limit).map((r) => withLinks(db, r));
 }
 
 /** Один фидбэк по ссылке, которой поделились. */
 export function getFeedback(db, id) {
   const row = db.prepare(`${SELECT_FEEDBACK} WHERE f.id = ?`).get(Number(id));
-  return row ? withLinks(row) : null;
+  return row ? withLinks(db, row) : null;
 }
 
 // Ссылки на карточки компании считаем на сервере: шаблоны живут в .env, а не в браузере.
-function withLinks(row) {
-  const b24 = process.env.B24_COMPANY_URL;
-  const argus = process.env.ARGUS_COMPANY_URL;
+const companyUrl = (tpl, id) => (tpl && id ? tpl.replace('{id}', id) : null);
+
+function withLinks(db, row) {
   return {
     ...row,
-    b24_url: b24 && row.b24_company_id ? b24.replace('{id}', row.b24_company_id) : null,
-    argus_url: argus && row.argus_company_id ? argus.replace('{id}', row.argus_company_id) : null,
+    b24_url: companyUrl(process.env.B24_COMPANY_URL, row.b24_company_id),
+    argus_url: companyUrl(process.env.ARGUS_COMPANY_URL, row.argus_company_id),
+    // Свободный фидбэк часто приходит со ссылкой на компанию прямо в тексте —
+    // достаём её оттуда, иначе привязка теряется и карточка выглядит пустой.
+    mentions: mentionedCompanies(db, row.text, { skipLeadId: row.lead_id }),
   };
+}
+
+const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Из шаблона ссылки делаем распознаватель: {id} — это и есть номер компании. */
+function urlMatcher(tpl) {
+  if (!tpl || !tpl.includes('{id}')) return null;
+  return new RegExp(escapeRe(tpl).replace(escapeRe('{id}'), '([A-Za-z0-9_-]+)'), 'g');
+}
+
+/**
+ * Компании, упомянутые ссылками в тексте фидбэка. Если такая компания у нас есть —
+ * подтягиваем её карточку целиком: название, лидоген, команду и обе ссылки.
+ */
+export function mentionedCompanies(db, text, { skipLeadId = null } = {}) {
+  const sources = [
+    { source: 'b24', column: 'b24_company_id', re: urlMatcher(process.env.B24_COMPANY_URL) },
+    { source: 'argus', column: 'argus_company_id', re: urlMatcher(process.env.ARGUS_COMPANY_URL) },
+  ];
+
+  const found = new Map();
+  for (const { source, column, re } of sources) {
+    if (!re) continue;
+    for (const m of String(text ?? '').matchAll(re)) {
+      const ref = m[1];
+      if (found.has(`${source}:${ref}`)) continue;
+      const lead = db.prepare(`
+        SELECT l.id, l.company, l.kind, l.lead_gen, l.status, l.b24_company_id, l.argus_company_id,
+               t.name team_name
+        FROM leads l LEFT JOIN teams t ON t.id = l.assigned_team
+        WHERE l.${column} = ? ORDER BY l.id DESC LIMIT 1`).get(ref);
+      if (lead && lead.id === skipLeadId) continue;   // это и есть компания фидбэка, не дублируем
+      found.set(`${source}:${ref}`, {
+        source,
+        ref,
+        url: m[0],
+        lead_id: lead?.id ?? null,
+        company: lead?.company ?? null,
+        lead_gen: lead?.lead_gen ?? null,
+        team_name: lead?.team_name ?? null,
+        status: lead?.status ?? null,
+        b24_url: companyUrl(process.env.B24_COMPANY_URL, lead?.b24_company_id ?? (source === 'b24' ? ref : null)),
+        argus_url: companyUrl(process.env.ARGUS_COMPANY_URL, lead?.argus_company_id ?? (source === 'argus' ? ref : null)),
+      });
+    }
+  }
+  return [...found.values()];
 }

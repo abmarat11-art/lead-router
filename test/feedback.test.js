@@ -111,3 +111,50 @@ test('карточка фидбэка несёт ссылки на компан�
 test('фидбэка с таким номером нет — карточка не выдумывается', () => {
   assert.equal(getFeedback(setup(), 999), null);
 });
+
+test('компанию узнаём по ссылке в тексте свободного фидбэка', () => {
+  const db = setup();
+  db.prepare("UPDATE leads SET b24_company_id = '3094401', argus_company_id = 'arg-77' WHERE id = 1").run();
+  process.env.B24_COMPANY_URL = 'https://acrm.site/crm/company/details/{id}/';
+  process.env.ARGUS_COMPANY_URL = 'https://crm-mvp.cloudplus.uz/companies/{id}';
+
+  const who = identify(db, USER);
+  const { id } = addFeedback(db, { who, text:
+    '1. Лидген говорит что сделаем ERP за 2 недели - https://acrm.site/crm/company/details/3094401/\n'
+    + '2. Обещает демо на встрече - https://acrm.site/crm/company/details/3109475/' });
+
+  const card = getFeedback(db, id);
+  assert.equal(card.lead_id, null, 'фидбэк свободный, привязки к строке нет');
+  assert.equal(card.mentions.length, 2);
+
+  const known = card.mentions[0];
+  assert.equal(known.company, 'BIZOAT NEFT', 'свою компанию узнали по номеру из ссылки');
+  assert.equal(known.lead_gen, 'Тагир', 'автор лида подтянулся');
+  assert.equal(known.team_name, 'МА');
+  assert.equal(known.argus_url, 'https://crm-mvp.cloudplus.uz/companies/arg-77');
+
+  const unknown = card.mentions[1];
+  assert.equal(unknown.company, null, 'чужой компании у нас нет — так и говорим');
+  assert.equal(unknown.ref, '3109475');
+  assert.equal(unknown.b24_url, 'https://acrm.site/crm/company/details/3109475/',
+    'ссылку всё равно отдаём: открыть карточку можно');
+});
+
+test('в привязанном фидбэке та же компания вторым списком не дублируется', () => {
+  const db = setup();
+  db.prepare("UPDATE leads SET b24_company_id = '3094401' WHERE id = 1").run();
+  process.env.B24_COMPANY_URL = 'https://acrm.site/crm/company/details/{id}/';
+  const who = identify(db, USER);
+  const { id } = addFeedback(db, { who, leadId: 1,
+    text: 'см. https://acrm.site/crm/company/details/3094401/' });
+  assert.deepEqual(getFeedback(db, id).mentions, []);
+});
+
+test('одна и та же ссылка дважды — одна строка', () => {
+  const db = setup();
+  process.env.B24_COMPANY_URL = 'https://acrm.site/crm/company/details/{id}/';
+  const who = identify(db, USER);
+  const { id } = addFeedback(db, { who,
+    text: 'https://acrm.site/crm/company/details/999/ и снова https://acrm.site/crm/company/details/999/' });
+  assert.equal(getFeedback(db, id).mentions.length, 1);
+});

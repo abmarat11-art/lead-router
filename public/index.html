@@ -34,6 +34,11 @@ const api = (url, method = 'GET', body) =>
 
 const esc = (s) => String(s ?? '').replace(/[<>&]/g, c => ({ '<':'&lt;','>':'&gt;','&':'&amp;' }[c]));
 
+// Текст фидбэка приходит со ссылками на карточки — делаем их кликабельными.
+// Экранируем сначала, ссылки ищем уже в безопасной строке.
+const linkify = (safe) => safe.replace(/https?:\/\/[^\s<]+/g,
+  (u) => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+
 function toast(text, kind = '') {
   const el = document.createElement('div');
   el.className = kind;
@@ -151,8 +156,10 @@ function renderFeedback() {
       <td>${when(f.created_at)}</td>
       <td>${esc(f.author)}</td>
       <td>${esc(f.team_name || '')}</td>
-      <td>${f.company ? esc(f.company) : '<span class="dim">без привязки</span>'}</td>
-      <td class="cut" onclick="openFeedback(${f.id})" title="открыть карточку">${esc(f.text).replace(/\n/g, '<br>')}</td>
+      <td>${f.company ? esc(f.company)
+        : f.mentions?.length ? f.mentions.map(m => esc(m.company || ('компания ' + m.ref))).join('<br>')
+        : '<span class="dim">без привязки</span>'}</td>
+      <td class="cut" onclick="openFeedback(${f.id})" title="открыть карточку">${esc(f.text).replace(/\n/g, ' ')}</td>
       <td><button class="ghost" onclick="openFeedback(${f.id})">Карточка</button></td>
     </tr>`).join('') + '</table>';
 }
@@ -175,8 +182,10 @@ async function openFeedback(id) {
     ${f.company
       ? `<p><b>${esc(f.company)}</b>${f.lead_gen ? ` <span class="dim">· лидоген ${esc(f.lead_gen)}</span>` : ''}</p>
          <p>${links || '<span class="dim">компания ещё не заведена в СРМ — ссылок нет</span>'}</p>`
+      : f.mentions?.length ? ''
       : '<p class="dim">Без привязки к компании — общий фидбэк по лидогенерации.</p>'}
-    <p class="fb-text">${esc(f.text).replace(/\n/g, '<br>')}</p>
+    ${mentionsBlock(f.mentions)}
+    <p class="fb-text">${linkify(esc(f.text)).replace(/\n/g, '<br>')}</p>
     <div class="row-actions">
       <input id="fb-link" value="${link}" readonly onclick="this.select()">
       <button class="act" onclick="copyLink()">Скопировать ссылку</button>
@@ -184,6 +193,25 @@ async function openFeedback(id) {
     <p class="dim">По этой ссылке карточка откроется сразу — можно кинуть в чат тому, у кого есть доступ.</p>`;
   document.getElementById('modal').classList.add('on');
   location.hash = 'feedback/' + f.id;
+}
+
+// Компании, узнанные по ссылкам в тексте: у своих показываем лидогена и команду.
+function mentionsBlock(mentions) {
+  if (!mentions || !mentions.length) return '';
+  return `<p class="dim">Компании по ссылкам в тексте:</p><table>`
+    + `<tr><th>Компания</th><th>Лидоген</th><th>Команда</th><th>Карточки</th></tr>`
+    + mentions.map(m => {
+      const links = [
+        m.b24_url ? `<a href="${m.b24_url}" target="_blank" rel="noopener">Б24</a>` : '',
+        m.argus_url ? `<a href="${m.argus_url}" target="_blank" rel="noopener">Аргус</a>` : '',
+      ].filter(Boolean).join(' · ');
+      return `<tr>
+        <td>${m.company ? esc(m.company) : `<span class="dim">нет в контуре (${esc(m.ref)})</span>`}</td>
+        <td>${esc(m.lead_gen || '')}</td>
+        <td>${esc(m.team_name || '')}</td>
+        <td>${links || '<span class="dim">—</span>'}</td>
+      </tr>`;
+    }).join('') + '</table>';
 }
 
 function closeFeedback() {
