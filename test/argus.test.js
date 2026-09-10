@@ -84,7 +84,7 @@ test('создание шлёт fields в формате Аргуса', async ()
     { VALUE: '+998901234567', VALUE_TYPE: 'WORK' },
     { VALUE: '+998901112233', VALUE_TYPE: 'WORK' },
   ]);
-  assert.deepEqual(fields.EMAIL, [{ VALUE: 'i@r.uz', VALUE_TYPE: 'WORK' }]);
+  assert.equal(fields.EMAIL, 'i@r.uz', 'у компании почта — строка, список Аргус отбрасывает');
   assert.equal(fields.CONTACT_NAME, undefined, 'контакт заводится отдельным contacts.add, а не полем компании');
   assert.equal(fields.ASSIGNED_BY_ID, 'user-2', 'компания заводится сразу на ответственного команды');
   assert.equal(fields.LEAD_TYPE, 'meeting', 'тип пишется в отдельное поле');

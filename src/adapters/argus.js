@@ -115,7 +115,7 @@ export async function createCompany(company, placement = {}, opts = {}) {
   const emails = [];
   for (const contact of company.contacts || []) {
     for (const p of contact.phones || []) phones.push({ VALUE: p, VALUE_TYPE: 'WORK' });
-    for (const e of contact.emails || []) emails.push({ VALUE: e, VALUE_TYPE: 'WORK' });
+    for (const e of contact.emails || []) emails.push(e);
   }
   const fields = {
     TITLE: company.title,
@@ -123,7 +123,9 @@ export async function createCompany(company, placement = {}, opts = {}) {
     ORGINFO: company.orginfo_url || undefined,
     OKED: okedText(company.oked) || undefined,
     PHONE: phones.length ? phones : undefined,
-    EMAIL: emails.length ? emails : undefined,
+    // EMAIL у компании — одна строка, а не список: массив Аргус молча отбрасывает
+    // (проверено на стенде 2026-09-10 — карточка возвращалась с EMAIL: null).
+    EMAIL: emails[0] || undefined,
     // Контактные лица здесь не передаются: с ff159e5 в Аргусе появились contacts.*,
     // и человек заводится отдельной карточкой (см. syncContacts ниже).
   };
