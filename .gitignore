@@ -4,3 +4,4 @@ data/
 *.log
 secrets/
 config/columns.json
+docs/kontur-lidov-instrukcii.html
