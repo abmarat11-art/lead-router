@@ -266,6 +266,12 @@ function renderQueues() {
       : 'внеочередников нет, идёт обычный круг'}</p>`).join('');
 }
 
+// Состояния доставки в Аргус по-русски: matched — компания там уже была, мы её не трогали.
+const ARGUS_STATE = {
+  pending: 'ждут отправки', sending: 'отправляются', sent: 'заведены', failed: 'ошибка отправки',
+  matched: 'уже были в Аргусе',
+};
+
 function renderTeams() {
   const byId = Object.fromEntries(teams.map(t => [t.id, t]));
   return `<table><tr><th>Порядок</th><th>Команда</th><th>Состав</th><th>Назначено сейчас</th><th>Взяли в работу</th><th>Отказы</th><th>Активна</th></tr>` +
@@ -294,7 +300,7 @@ function renderTeams() {
       Object.entries(st.sheet_writes || {}).map(([k, v]) => `<div class="card"><b>${v}</b><span>${k}</span></div>`).join('') || '<span class="dim">записей нет</span>'
     }</div>
     <h3>Компании в Аргусе</h3><div class="cards">${
-      Object.entries(st.argus || {}).map(([k, v]) => `<div class="card"><b>${v}</b><span>${k}</span></div>`).join('') || '<span class="dim">пока не отправляли</span>'
+      Object.entries(st.argus || {}).map(([k, v]) => `<div class="card"><b>${v}</b><span>${ARGUS_STATE[k] || k}</span></div>`).join('') || '<span class="dim">пока не отправляли</span>'
     }</div>`;
 }
 

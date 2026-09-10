@@ -81,6 +81,75 @@ export function enqueueAssignment(db, leadId, teamId) {
   return { queued, skipped };
 }
 
+/**
+ * Компания уже ведётся в Аргусе — сигнал руководителю команды того, кто её ведёт.
+ * Назначения не было, поэтому это не «вам назначено», а просьба разобраться,
+ * почему своя компания оказалась в лидогенерации.
+ */
+export function buildDuplicateText(lead, { teamName, responsible, argusTitle }) {
+  const lines = [
+    '⚠️ <b>Компания уже ведётся в Аргусе</b>',
+    '',
+    `<b>${escape(argusTitle || lead.company)}</b>`,
+  ];
+  if (lead.lead_gen) lines.push(`Лидоген: ${escape(lead.lead_gen)}`);
+  if (teamName) lines.push(`Пришла как ${KIND_LABEL[lead.kind] || lead.kind} в команду: ${escape(teamName)}`);
+  if (responsible) lines.push(`Ответственный в Аргусе: ${escape(responsible)}`);
+  lines.push('', 'Назначение не делали и карточку не трогали. Ход команде не засчитан — '
+    + 'строка помечена как фрод. Нужно проверить, почему эта компания попала в лидогенерацию.');
+
+  const links = companyLinks(lead);
+  if (links.length) lines.push('', links.join(' · '));
+  return lines.join('\n');
+}
+
+/**
+ * Кому уходит такой сигнал: руководителю команды, где числится ответственный
+ * (участник с ролью assignee), иначе — самому ответственному, если он у нас есть.
+ * Никого не нашли — резервный чат из DUPLICATE_ALERT_CHAT_ID, чтобы сигнал не пропал.
+ */
+export function duplicateRecipients(db, responsible) {
+  const owner = responsible ? db.prepare(`
+    SELECT m.*, t.name team_name FROM team_members m JOIN teams t ON t.id = m.team_id
+    WHERE lower(trim(m.argus_user_id)) = lower(?) AND m.active = 1 LIMIT 1`).get(String(responsible).trim()) : null;
+
+  if (owner) {
+    const head = db.prepare(`
+      SELECT m.*, t.name team_name FROM team_members m JOIN teams t ON t.id = m.team_id
+      WHERE m.team_id = ? AND m.role = 'assignee' AND m.active = 1 ORDER BY m.id LIMIT 1`).get(owner.team_id);
+    // Руководителя нет в телеграме — лучше написать самому ответственному, чем молчать.
+    const target = [head, owner].find((m) => m?.telegram_chat_id);
+    if (target) return [target];
+  }
+  const fallback = process.env.DUPLICATE_ALERT_CHAT_ID;
+  return fallback ? [{ id: null, telegram_chat_id: fallback, team_id: null, team_name: null }] : [];
+}
+
+/** Поставить сигнал о дубле в очередь. Повтор по той же строке и чату не плодим. */
+export function enqueueDuplicateAlert(db, leadId, teamId, { responsible = null, argusTitle = null } = {}) {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
+  if (!lead) return { queued: 0, skipped: 0 };
+  const team = teamId ? db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId) : null;
+
+  const targets = duplicateRecipients(db, responsible);
+  if (!targets.length) return { queued: 0, skipped: 1, reason: 'некому отправить: ответственный не найден в командах' };
+
+  const text = buildDuplicateText(lead, { teamName: team?.name || null, responsible, argusTitle });
+  let queued = 0;
+  for (const target of targets) {
+    const exists = db.prepare(
+      'SELECT 1 FROM tg_outbox WHERE lead_id = ? AND chat_id = ? AND text = ?'
+    ).get(leadId, String(target.telegram_chat_id), text);
+    if (exists) continue;
+    // member_id намеренно пустой: по нему enqueueAssignment ищет свои дубли,
+    // и сигнал о чужой компании не должен гасить будущее уведомление о назначении.
+    db.prepare('INSERT INTO tg_outbox (lead_id, team_id, member_id, chat_id, text) VALUES (?, ?, NULL, ?, ?)')
+      .run(leadId, target.team_id ?? null, String(target.telegram_chat_id), text);
+    queued++;
+  }
+  return { queued, skipped: 0 };
+}
+
 /** Один проход воркера уведомлений. */
 export async function flushNotifications(db, { limit = 20, send = sendMessage } = {}) {
   const rows = db.prepare(
@@ -92,7 +161,10 @@ export async function flushNotifications(db, { limit = 20, send = sendMessage } 
   for (const row of rows) {
     const attempts = row.attempts + 1;
     try {
-      await send(row.chat_id, row.text, { replyMarkup: feedbackButton(row.lead_id) });
+      // Кнопка фидбэка — только под уведомлением участнику команды. Сигнал о чужой
+      // компании (member_id пустой) уходит без неё: лид не его, фидбэк по нему не нужен.
+      await send(row.chat_id, row.text,
+        { replyMarkup: row.member_id ? feedbackButton(row.lead_id) : undefined });
       db.prepare("UPDATE tg_outbox SET state = 'sent', attempts = ?, sent_at = ?, last_error = NULL WHERE id = ?")
         .run(attempts, nowIso(), row.id);
       sent++;

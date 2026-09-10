@@ -74,19 +74,31 @@ function blamesNotifyOnly(err, fields, notifyKey, assignedKey) {
   return list.some((id) => text.includes(id));
 }
 
-// ОКЭД приходит из Б24 как «14120 - Производство спецодежды», а Аргус ждёт код.
-export const okedCode = (raw) => {
-  const match = String(raw ?? '').trim().match(/^\d+/);
-  return match ? match[0] : null;
+// ОКЭД в Аргусе — обычное текстовое поле, а не справочник:
+// что пришло из Б24, то и кладём («14120 - Производство спецодежды»).
+export const okedText = (raw) => {
+  const text = String(raw ?? '').trim();
+  return text || null;
 };
 
-/** Компания с таким ИНН уже заведена? Возвращает её ID или null. */
+/** Компания с таким ИНН уже заведена? Возвращает её карточку или null. */
 export async function findCompanyByInn(inn, opts = {}) {
   if (!inn) return null;
   const list = await call('companies.list', { filter: { INN: inn } }, opts);
   // фильтр серверный, но сверяем сами: вдруг вернулось лишнее
-  const found = (list || []).find((c) => digits(c.INN) === digits(inn));
-  return found ? String(found.ID) : null;
+  return (list || []).find((c) => digits(c.INN) === digits(inn)) || null;
+}
+
+/**
+ * Кто ведёт компанию в Аргусе.
+ * Возвращает id ответственного, null — поля в ответе нет (Аргус его пока не отдаёт).
+ * Это не то же самое, что «ответственного нет»: неизвестность трактуем осторожно.
+ */
+export function companyResponsible(record) {
+  const { fields } = argusFields();
+  const value = record?.[fields.assignedBy];
+  const id = String(value ?? '').trim();
+  return id || null;
 }
 
 /**
@@ -105,19 +117,15 @@ export async function createCompany(company, placement = {}, opts = {}) {
     for (const p of contact.phones || []) phones.push({ VALUE: p, VALUE_TYPE: 'WORK' });
     for (const e of contact.emails || []) emails.push({ VALUE: e, VALUE_TYPE: 'WORK' });
   }
-  const [contact] = company.contacts || [];
-
   const fields = {
     TITLE: company.title,
     INN: company.inn,
     ORGINFO: company.orginfo_url || undefined,
-    OKED: okedCode(company.oked) || undefined,
+    OKED: okedText(company.oked) || undefined,
     PHONE: phones.length ? phones : undefined,
     EMAIL: emails.length ? emails : undefined,
-    // контакт заводится и привязывается к компании, если передать имя
-    CONTACT_NAME: contact?.full_name || undefined,
-    CONTACT_PHONE: contact?.phone || contact?.phones?.[0] || undefined,
-    CONTACT_EMAIL: contact?.email || contact?.emails?.[0] || undefined,
+    // Контактные лица здесь не передаются: с ff159e5 в Аргусе появились contacts.*,
+    // и человек заводится отдельной карточкой (см. syncContacts ниже).
   };
 
   Object.assign(fields, placementFields(placement));
@@ -127,8 +135,8 @@ export async function createCompany(company, placement = {}, opts = {}) {
   try {
     result = await call('companies.add', { fields }, opts);
   } catch (err) {
-    // Справочник ОКЭД в Аргусе неполный: кода из Б24 в нём может не быть.
-    // Компанию из-за этого не теряем — заводим без кода, дозаполнят руками.
+    // ОКЭД — свободный текст, но если Аргус вдруг заупрямится,
+    // компанию не теряем: заводим без него, дозаполнят руками.
     if (fields.OKED && isUnknownReference(err)) {
       delete fields.OKED;
       result = await call('companies.add', { fields }, opts);
@@ -142,6 +150,69 @@ export async function createCompany(company, placement = {}, opts = {}) {
   const id = result?.ID ?? result?.id ?? (typeof result === 'string' ? result : null);
   if (!id) throw new Error('Аргус companies.add не вернул ID компании');
   return String(id);
+}
+
+// ── Контакты ────────────────────────────────────────────────────────────────
+// Контакт в Аргусе — отдельная сущность, а не поле компании: один человек может
+// числиться в нескольких компаниях, у компании — сколько угодно людей.
+// COMPANY_ID обязателен везде, кроме contacts.get.
+
+/** Телефоны контакта в формате Аргуса. Без телефона контакт не примут. */
+const contactPhones = (contact) => {
+  const list = contact.phones?.length ? contact.phones : [contact.phone].filter(Boolean);
+  return [...new Set(list.map((v) => String(v).trim()).filter(Boolean))]
+    .map((VALUE) => ({ VALUE, VALUE_TYPE: 'WORK' }));
+};
+
+/**
+ * Завести человека в карточке компании.
+ * @param {string} companyId publicId компании
+ * @param {object} contact карточка из adapters/bitrix.js
+ * @param {{primary?: boolean}} opts_ главный контакт компании — ровно один
+ */
+export async function addContact(companyId, contact, { primary = false } = {}, opts = {}) {
+  if (!companyId) throw new Error('contacts.add без COMPANY_ID: контакт живёт связью с компанией');
+  const name = String(contact?.full_name || '').trim();
+  if (!name) throw new Error('у контакта нет имени — Аргус его не примет');
+  const phone = contactPhones(contact);
+  if (!phone.length) throw new Error(`у контакта «${name}» нет телефона — Аргус требует хотя бы один`);
+
+  const fields = {
+    COMPANY_ID: companyId,
+    NAME: name,
+    PHONE: phone,
+    EMAIL: contact.email || contact.emails?.[0] || undefined,
+    IS_PRIMARY: primary ? 'Y' : undefined,
+  };
+  const result = await call('contacts.add', { fields }, opts);
+  const id = result?.ID ?? result?.id ?? null;
+  return id ? String(id) : null;
+}
+
+/** Все люди компании. */
+export const listContacts = (companyId, opts = {}) =>
+  call('contacts.list', { filter: { COMPANY_ID: companyId } }, opts);
+
+/**
+ * Завести всех контактных лиц компании: первый пригодный — главный.
+ * Контакт — довесок к компании: его срыв не должен ронять уже заведённую строку,
+ * поэтому ошибки собираются в отчёт, а не бросаются наружу.
+ */
+export async function syncContacts(companyId, contacts = [], opts = {}) {
+  const report = { added: 0, skipped: 0, errors: [] };
+  let primaryTaken = false;
+  for (const contact of contacts) {
+    try {
+      await addContact(companyId, contact, { primary: !primaryTaken }, opts);
+      primaryTaken = true;
+      report.added++;
+    } catch (err) {
+      // Человек без имени или телефона — не ошибка интеграции, а неполная карточка в Б24.
+      if (/нет имени|нет телефона/.test(String(err.message || ''))) report.skipped++;
+      else report.errors.push(String(err.message || err));
+    }
+  }
+  return report;
 }
 
 /** Поля назначения: кому и с каким типом. */
@@ -173,23 +244,37 @@ export async function assignCompany(id, placement = {}, opts = {}) {
 }
 
 /**
- * Есть — берём существующую и передаём ответственному, нет — заводим сразу на него.
+ * Компании в Аргусе нет — заводим сразу на ответственного команды.
+ * Компания уже есть — НЕ трогаем: у неё свой хозяин, отбирать её лидген не вправе.
+ * Такая строка возвращается как matched, а решение (фрод, долг команде, сигнал
+ * руководителю) принимает core/argusDelivery — адаптер в СРМ ничего не переписывает.
+ *
  * Гонка (кто-то завёл компанию между поиском и созданием) отдаёт 409 по ИНН —
- * тогда находим её и назначаем, а не роняем строку.
+ * это тот же случай matched, а не ошибка строки.
  */
 export async function ensureCompany(company, placement = {}, opts = {}) {
   const existing = await findCompanyByInn(company.inn, opts);
-  if (existing) {
-    await assignCompany(existing, placement, opts);
-    return { id: existing, created: false };
-  }
+  if (existing) return matched(existing);
+  // Сигнал наружу ровно в момент, когда компанию действительно заводим:
+  // по нему вызывающий отличит свою компанию от чужой, если ответа не дождётся.
+  await opts.onCreateAttempt?.();
   try {
-    return { id: await createCompany(company, placement, opts), created: true };
+    const id = await createCompany(company, placement, opts);
+    // Компания заведена — заводим её людей. Сорвалось — компания всё равно наша.
+    const contacts = await syncContacts(id, company.contacts || [], opts);
+    return { id, created: true, matched: false, contacts };
   } catch (err) {
     if (err.status !== 409) throw err;
     const found = await findCompanyByInn(company.inn, opts);
     if (!found) throw err;
-    await assignCompany(found, placement, opts);
-    return { id: found, created: false };
+    return matched(found);
   }
 }
+
+const matched = (record) => ({
+  id: String(record.ID),
+  created: false,
+  matched: true,
+  responsible: companyResponsible(record),
+  title: record.TITLE || null,
+});

@@ -242,3 +242,16 @@ test('через минуту молчания отвечаем снова: че
   await collectContacts(db, { fetch: async () => [upd(3, 'karinatyo')], send });
   assert.equal(sent.length, 2, 'через минуту отвечаем снова');
 });
+
+test('сигнал о чужой компании уходит без кнопки фидбэка', async () => {
+  const db = openMigrated(':memory:');
+  db.prepare("INSERT INTO teams (id, name, queue_order) VALUES (1, 'Команда 1', 1)").run();
+  db.prepare("INSERT INTO leads (id, source_key, source_hash, company, kind, status) VALUES (1, 'Лист1:2', 'h', 'ООО Ромашка', 'lead', 'rejected')").run();
+  db.prepare("INSERT INTO tg_outbox (lead_id, team_id, member_id, chat_id, text) VALUES (1, 1, NULL, '222', 'сигнал')").run();
+  process.env.MINIAPP_URL = 'https://lidgen.example';
+
+  const seen = [];
+  await flushNotifications(db, { send: async (chat, text, opts) => { seen.push({ chat, opts }); } });
+  assert.equal(seen[0].opts.replyMarkup, undefined);
+  delete process.env.MINIAPP_URL;
+});

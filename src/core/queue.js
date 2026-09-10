@@ -166,6 +166,31 @@ export function markDeclined(db, leadId, reason = null) {
   return { ok: true, debt_team: a?.team_id ?? null };
 }
 
+/**
+ * Компания уже ведётся в Аргусе. Строка закрывается, но это не отказ команды:
+ * она ничего не отклоняла — ход у неё украла чужая карточка. Поэтому назначение
+ * гасим как отменённое (в «Отказы» команды не попадает), а долг пишем.
+ */
+export function markDuplicate(db, leadId, reason = 'компания уже ведётся в Аргусе') {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
+  if (!lead) return { ok: false };
+  // Строка могла уже уйти в «в работе» — такое назначение тоже гасим,
+  // иначе у команды останется и зачтённый ход, и долг за него.
+  const a = openAssignment(db, leadId)
+    || db.prepare("SELECT * FROM assignments WHERE lead_id = ? AND state = 'in_work' ORDER BY id DESC").get(leadId);
+  if (a) {
+    db.prepare("UPDATE assignments SET state = 'cancelled', resolved_at = ?, reason = ? WHERE id = ?")
+      .run(nowIso(), reason, a.id);
+  }
+  const teamId = lead.assigned_team ?? a?.team_id ?? null;
+  if (teamId) pushPriority(db, lead.kind, teamId, { leadId, reason });
+
+  db.prepare("UPDATE leads SET status = 'rejected', status_changed_at = ?, updated_at = ? WHERE id = ?")
+    .run(nowIso(), nowIso(), leadId);
+  logEvent(db, { leadId, teamId, kind: 'duplicate_closed', data: { reason } });
+  return { ok: true, debt_team: teamId };
+}
+
 function openAssignment(db, leadId) {
   return db.prepare("SELECT * FROM assignments WHERE lead_id = ? AND state = 'pending' ORDER BY id DESC").get(leadId);
 }
@@ -189,7 +214,10 @@ export function assignManually(db, leadId, teamId) {
     .run(teamId, nowIso(), nowIso(), nowIso(), leadId);
   logEvent(db, { leadId, teamId, kind: 'assigned_manually' });
   queueSheetWrite(db, lead);
-  db.prepare("UPDATE leads SET argus_state = 'pending', argus_attempts = 0 WHERE id = ?").run(leadId);
+  // Привязку к компании в Аргусе сбрасываем: строка поедет заново, и решение
+  // «своя или чужая» должно приниматься по свежему поиску, а не по старому id.
+  db.prepare("UPDATE leads SET argus_state = 'pending', argus_attempts = 0, argus_company_id = NULL WHERE id = ?")
+    .run(leadId);
   enqueueWebhook(db, 'lead.assigned', leadId, teamId, { manual: true });
   return { ok: true };
 }
