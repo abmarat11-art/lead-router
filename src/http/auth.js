@@ -1,6 +1,7 @@
 // Вход по логину и паролю. Пара берётся из окружения, пароль в коде не лежит.
 // Сессия — подписанная кука, чтобы не гонять пароль в каждом запросе.
-import { createHmac, timingSafeEqual, randomBytes } from 'node:crypto';
+import { createHmac, timingSafeEqual, randomBytes, scryptSync } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 const COOKIE = 'lr_session';
 const TTL_MS = 12 * 60 * 60 * 1000;   // 12 часов
@@ -38,6 +39,27 @@ const parseCookies = (header = '') => Object.fromEntries(
 
 export const authEnabled = () => !!(process.env.AUTH_USER && process.env.AUTH_PASSWORD);
 
+// Дополнительные пользователи — файл USERS_FILE (по умолчанию config/users.json):
+// { "login": { "name": "…", "salt": "hex", "hash": "hex" } }. Пароли только хешем (scrypt).
+// Файл читается на каждый вход, чтобы добавлять людей без перезапуска.
+export const usersFile = () => process.env.USERS_FILE || 'config/users.json';
+
+export function loadUsers() {
+  try { return JSON.parse(readFileSync(usersFile(), 'utf8')); } catch { return {}; }
+}
+
+export function hashPassword(password, salt = randomBytes(16).toString('hex')) {
+  return { salt, hash: scryptSync(String(password), salt, 32).toString('hex') };
+}
+
+/** Логин и пароль подходят кому-то — админу из окружения или человеку из файла. */
+export function checkCredentials(user, password) {
+  if (safeEqual(user, process.env.AUTH_USER) && safeEqual(password, process.env.AUTH_PASSWORD)) return true;
+  const record = loadUsers()[user];
+  if (!record?.salt || !record?.hash || record.disabled) return false;
+  return safeEqual(hashPassword(password, record.salt).hash, record.hash);
+}
+
 /**
  * Оборачивает обработчик проверкой сессии. Без AUTH_USER/AUTH_PASSWORD
  * защита не включается — локальная разработка остаётся без логина.
@@ -52,8 +74,7 @@ export function withAuth(handler) {
       const chunks = [];
       for await (const c of req) chunks.push(c);
       const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
-      const ok = safeEqual(body.user ?? '', process.env.AUTH_USER)
-        && safeEqual(body.password ?? '', process.env.AUTH_PASSWORD);
+      const ok = checkCredentials(body.user ?? '', body.password ?? '');
       if (!ok) {
         res.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({ error: 'неверный логин или пароль' }));

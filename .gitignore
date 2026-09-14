@@ -5,3 +5,4 @@ data/
 secrets/
 config/columns.json
 docs/kontur-lidov-instrukcii.html
+config/users.json

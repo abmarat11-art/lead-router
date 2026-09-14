@@ -78,3 +78,19 @@ test('без AUTH_USER защита не включается', () => {
     assert.equal((await call('/api/leads')).status, 200);
   });
 });
+
+test('пользователь из файла входит, чужой пароль и выключенный — нет', () => withServer(async (call) => {
+  const { writeFileSync, rmSync } = await import('node:fs');
+  const { hashPassword } = await import('../src/http/auth.js');
+  process.env.USERS_FILE = 'data/test-users.json';
+  writeFileSync(process.env.USERS_FILE, JSON.stringify({
+    vpak: { name: 'Владимир', ...hashPassword('pass-vpak') },
+    gone: { name: 'Ушёл', ...hashPassword('pass-gone'), disabled: true },
+  }));
+  try {
+    assert.equal((await login(call, 'vpak', 'pass-vpak')).status, 200);
+    assert.equal((await login(call, 'vpak', 'pass-gone')).status, 401);
+    assert.equal((await login(call, 'gone', 'pass-gone')).status, 401);
+    assert.equal((await login(call, 'admin', 'secret123')).status, 200);
+  } finally { rmSync(process.env.USERS_FILE, { force: true }); delete process.env.USERS_FILE; }
+}));
