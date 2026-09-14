@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { findCompanyByInn, createCompany, ensureCompany, assignCompany, placementFields, okedText, companyResponsible, addContact, syncContacts } from '../src/adapters/argus.js';
+import { findCompanyByInn, createCompany, ensureCompany, assignCompany, placementFields, okedText, companyResponsible, addContact, syncContacts, setArgusFields, argusFields } from '../src/adapters/argus.js';
 
 const COMPANY = {
   b24_id: '4021',
@@ -88,16 +88,22 @@ test('создание шлёт fields в формате Аргуса', async ()
   assert.equal(fields.CONTACT_NAME, undefined, 'контакт заводится отдельным contacts.add, а не полем компании');
   assert.equal(fields.ASSIGNED_BY_ID, 'user-2', 'компания заводится сразу на ответственного команды');
   assert.equal(fields.LEAD_TYPE, 'meeting', 'тип пишется в отдельное поле');
-  assert.equal(fields.SOURCE, 'лидген', 'источник карточки — лидген');
+  assert.equal(fields.SOURCE, undefined, 'источник задаёт ключ Аргуса, в запросе его нет');
 });
 
-test('контакт тоже уходит с источником «лидген»', async () => {
+test('источник в запросе появляется только если задан в конфиге — у компании и у контакта', async () => {
+  setArgusFields({ ...argusFields(), sourceValue: 'лидген' });
   const seen = [];
+  await createCompany(COMPANY, {}, {
+    fetchImpl: async (url, init) => { seen.push(JSON.parse(init.body)); return ok({ ID: 'c-1' }); },
+  });
+  assert.equal(seen[0].fields.SOURCE, 'лидген');
   await addContact('c-1', { full_name: 'Иван', phones: ['+998901234567'] }, { primary: true }, {
     fetchImpl: async (url, init) => { seen.push(JSON.parse(init.body)); return ok({ ID: 'p-1' }); },
   });
-  assert.equal(seen[0].fields.SOURCE, 'лидген');
-  assert.equal(seen[0].fields.COMPANY_ID, 'c-1');
+  assert.equal(seen[1].fields.SOURCE, 'лидген');
+  assert.equal(seen[1].fields.COMPANY_ID, 'c-1');
+  setArgusFields(null);
 });
 
 test('без ИНН компанию не отправляем: Аргус её всё равно не примет', async () => {
