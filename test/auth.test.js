@@ -85,6 +85,7 @@ test('пользователь из файла входит, чужой паро
   process.env.USERS_FILE = 'data/test-users.json';
   writeFileSync(process.env.USERS_FILE, JSON.stringify({
     vpak: { name: 'Владимир', ...hashPassword('pass-vpak') },
+    'a.novoseltsev': { name: 'Артём', ...hashPassword('pass-dot') },
     gone: { name: 'Ушёл', ...hashPassword('pass-gone'), disabled: true },
   }));
   try {
@@ -92,5 +93,10 @@ test('пользователь из файла входит, чужой паро
     assert.equal((await login(call, 'vpak', 'pass-gone')).status, 401);
     assert.equal((await login(call, 'gone', 'pass-gone')).status, 401);
     assert.equal((await login(call, 'admin', 'secret123')).status, 200);
+    // логин с точкой: сессия должна не только выдаться, но и приниматься
+    const dotted = await login(call, 'a.novoseltsev', 'pass-dot');
+    assert.equal(dotted.status, 200);
+    const cookie = dotted.headers.get('set-cookie').split(';')[0];
+    assert.equal((await call('/api/teams', { headers: { cookie } })).status, 200);
   } finally { rmSync(process.env.USERS_FILE, { force: true }); delete process.env.USERS_FILE; }
 }));

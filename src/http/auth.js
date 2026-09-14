@@ -28,7 +28,11 @@ export function verifyToken(token) {
   if (!encoded || !signature) return null;
   const payload = Buffer.from(encoded, 'base64url').toString('utf8');
   if (!safeEqual(signature, sign(payload))) return null;
-  const [user, expires] = payload.split('.');
+  // логин может содержать точку (a.novoseltsev), поэтому режем по последней
+  const dot = payload.lastIndexOf('.');
+  if (dot < 0) return null;
+  const user = payload.slice(0, dot);
+  const expires = payload.slice(dot + 1);
   return Number(expires) > Date.now() ? user : null;
 }
 
