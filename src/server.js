@@ -88,7 +88,11 @@ every(10_000, async () => {
 
 function every(ms, fn) {
   const run = async () => {
-    try { await fn(); } catch (err) { log('ошибка цикла:', err.message); }
+    try { await fn(); } catch (err) {
+      // «fetch failed» без причины ничего не говорит — вытаскиваем код и адрес из cause
+      const cause = err.cause ? ` (${err.cause.code || err.cause.message}${err.cause.hostname ? ' ' + err.cause.hostname : ''})` : '';
+      log(`ошибка цикла ${ms / 1000}с:`, err.message + cause);
+    }
   };
   setInterval(run, ms);
   run();
