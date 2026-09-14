@@ -88,6 +88,16 @@ test('создание шлёт fields в формате Аргуса', async ()
   assert.equal(fields.CONTACT_NAME, undefined, 'контакт заводится отдельным contacts.add, а не полем компании');
   assert.equal(fields.ASSIGNED_BY_ID, 'user-2', 'компания заводится сразу на ответственного команды');
   assert.equal(fields.LEAD_TYPE, 'meeting', 'тип пишется в отдельное поле');
+  assert.equal(fields.SOURCE, 'лидген', 'источник карточки — лидген');
+});
+
+test('контакт тоже уходит с источником «лидген»', async () => {
+  const seen = [];
+  await addContact('c-1', { full_name: 'Иван', phones: ['+998901234567'] }, { primary: true }, {
+    fetchImpl: async (url, init) => { seen.push(JSON.parse(init.body)); return ok({ ID: 'p-1' }); },
+  });
+  assert.equal(seen[0].fields.SOURCE, 'лидген');
+  assert.equal(seen[0].fields.COMPANY_ID, 'c-1');
 });
 
 test('без ИНН компанию не отправляем: Аргус её всё равно не примет', async () => {

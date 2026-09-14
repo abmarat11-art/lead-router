@@ -10,10 +10,18 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const RATE_LIMIT_PAUSE_MS = 2000;   // потолок 60 запросов в минуту на ключ
 
 const DEFAULT_FIELDS = {
-  fields: { assignedBy: 'ASSIGNED_BY_ID', kind: 'LEAD_TYPE', notify: 'NOTIFY_USER_IDS' },
+  fields: { assignedBy: 'ASSIGNED_BY_ID', kind: 'LEAD_TYPE', notify: 'NOTIFY_USER_IDS', source: 'SOURCE' },
   // Поле-список: у подписи («Лид») админ может поменять текст, ключ — нет.
   kindValues: { lead: 'lead', meeting: 'meeting' },
+  // Откуда пришла карточка — ставится и компании, и каждому её контакту.
+  sourceValue: 'лидген',
 };
+
+/** Поле «источник» для companies.add / contacts.add; пустое значение — не слать. */
+export function sourceField() {
+  const { fields: names, sourceValue } = argusFields();
+  return sourceValue && names.source ? { [names.source]: sourceValue } : {};
+}
 
 let fieldConfig = null;
 /** Имена полей Аргуса — из config/argus.json, чтобы переименование не лезло в код. */
@@ -24,6 +32,7 @@ export function argusFields() {
   fieldConfig = {
     fields: { ...DEFAULT_FIELDS.fields, ...(raw.fields || {}) },
     kindValues: { ...DEFAULT_FIELDS.kindValues, ...(raw.kindValues || {}) },
+    sourceValue: raw.sourceValue ?? DEFAULT_FIELDS.sourceValue,
   };
   return fieldConfig;
 }
@@ -130,7 +139,7 @@ export async function createCompany(company, placement = {}, opts = {}) {
     // и человек заводится отдельной карточкой (см. syncContacts ниже).
   };
 
-  Object.assign(fields, placementFields(placement));
+  Object.assign(fields, placementFields(placement), sourceField());
 
   const { fields: names } = argusFields();
   let result;
@@ -185,6 +194,7 @@ export async function addContact(companyId, contact, { primary = false } = {}, o
     PHONE: phone,
     EMAIL: contact.email || contact.emails?.[0] || undefined,
     IS_PRIMARY: primary ? 'Y' : undefined,
+    ...sourceField(),
   };
   const result = await call('contacts.add', { fields }, opts);
   const id = result?.ID ?? result?.id ?? null;

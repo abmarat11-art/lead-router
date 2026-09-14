@@ -2,12 +2,16 @@
   "_comment": "Имена полей в Аргусе. Меняются здесь, без правки кода.",
   "fields": {
     "assignedBy": "ASSIGNED_BY_ID",
-    "kind": "LEAD_TYPE"
+    "kind": "LEAD_TYPE",
+    "source": "SOURCE"
   },
 
   "_comment2": "Что писать в поле типа: лид или встреча.",
   "kindValues": {
     "lead": "lead",
     "meeting": "meeting"
-  }
+  },
+
+  "_comment3": "Источник карточки — ставится компании и каждому контакту. Имя поля — в fields.source.",
+  "sourceValue": "лидген"
 }
