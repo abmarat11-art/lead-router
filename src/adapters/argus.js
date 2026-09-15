@@ -14,7 +14,7 @@ const DEFAULT_FIELDS = {
   // Поле-список: у подписи («Лид») админ может поменять текст, ключ — нет.
   kindValues: { lead: 'lead', meeting: 'meeting' },
   // Откуда пришла карточка — ставится и компании, и каждому её контакту.
-  sourceValue: 'лидген',
+  sourceValue: 'leadgen',
 };
 
 /** Поле «источник» для companies.add / contacts.add; пустое значение — не слать. */
@@ -194,7 +194,7 @@ export async function addContact(companyId, contact, { primary = false } = {}, o
     PHONE: phone,
     EMAIL: contact.email || contact.emails?.[0] || undefined,
     IS_PRIMARY: primary ? 'Y' : undefined,
-    ...sourceField(),
+    // SOURCE у контактов не принимается — источник есть только у компании.
   };
   const result = await call('contacts.add', { fields }, opts);
   const id = result?.ID ?? result?.id ?? null;

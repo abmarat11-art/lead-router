@@ -88,10 +88,10 @@ test('создание шлёт fields в формате Аргуса', async ()
   assert.equal(fields.CONTACT_NAME, undefined, 'контакт заводится отдельным contacts.add, а не полем компании');
   assert.equal(fields.ASSIGNED_BY_ID, 'user-2', 'компания заводится сразу на ответственного команды');
   assert.equal(fields.LEAD_TYPE, 'meeting', 'тип пишется в отдельное поле');
-  assert.equal(fields.SOURCE, undefined, 'источник задаёт ключ Аргуса, в запросе его нет');
+  assert.equal(fields.SOURCE, 'leadgen', 'источник компании — из config/argus.json');
 });
 
-test('источник в запросе появляется только если задан в конфиге — у компании и у контакта', async () => {
+test('источник уходит только у компании; пустое значение в конфиге — поле не шлём', async () => {
   setArgusFields({ ...argusFields(), sourceValue: 'лидген' });
   const seen = [];
   await createCompany(COMPANY, {}, {
@@ -101,8 +101,13 @@ test('источник в запросе появляется только ес�
   await addContact('c-1', { full_name: 'Иван', phones: ['+998901234567'] }, { primary: true }, {
     fetchImpl: async (url, init) => { seen.push(JSON.parse(init.body)); return ok({ ID: 'p-1' }); },
   });
-  assert.equal(seen[1].fields.SOURCE, 'лидген');
+  assert.equal(seen[1].fields.SOURCE, undefined, 'у contacts.add поля SOURCE нет');
   assert.equal(seen[1].fields.COMPANY_ID, 'c-1');
+  setArgusFields({ ...argusFields(), sourceValue: '' });
+  await createCompany(COMPANY, {}, {
+    fetchImpl: async (url, init) => { seen.push(JSON.parse(init.body)); return ok({ ID: 'c-2' }); },
+  });
+  assert.equal(seen[2].fields.SOURCE, undefined, 'пусто в конфиге — источник берётся с ключа');
   setArgusFields(null);
 });
 
