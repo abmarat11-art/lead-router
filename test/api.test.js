@@ -110,3 +110,14 @@ test('команды: создание, порядок, отключение', (
   assert.equal(teams.length, 5);
   assert.equal(teams.find((t) => t.id === created.id).active, 0);
 }));
+
+test('в списке лидов видно, кто взял компанию в работу из телеграма', () => withServer(async ({ db, call }) => {
+  await call('/api/import/rows', 'POST', { rows: rows(row('ООО Ромашка', '901234567', 'Аня', 'Лид')) });
+  const [lead] = (await call('/api/leads')).body;
+  assert.equal(lead.taken, null);
+  db.prepare("INSERT INTO lead_takes (lead_id, team_id, member_id, chat_id, name) VALUES (?, ?, 1, '111', 'Бехруз Тамиров')")
+    .run(lead.id, lead.assigned_team);
+  const [after] = (await call('/api/leads')).body;
+  assert.equal(after.taken.name, 'Бехруз Тамиров');
+  assert.ok(after.taken.taken_at);
+}));

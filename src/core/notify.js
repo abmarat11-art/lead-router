@@ -1,7 +1,8 @@
 // Уведомления команде о назначении: получателю и всем, кто в списке уведомлений.
 // Пишем в очередь, отправляет воркер — телеграм может лежать, раздача от этого не встаёт.
-import { sendMessage, getUpdates } from '../adapters/telegram.js';
+import { sendMessage, getUpdates, answerCallback, editReplyMarkup } from '../adapters/telegram.js';
 import { logTeamChange } from './teams.js';
+import { logEvent } from './queue.js';
 
 const BACKOFF_SEC = [0, 30, 120, 600, 3600];
 const nowIso = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -52,6 +53,103 @@ export function feedbackButton(leadId, { base = process.env.MINIAPP_URL } = {}) 
 }
 
 /**
+ * Кнопки под уведомлением о назначении: фидбэк и «Взял в работу».
+ * Когда компанию уже взяли — вместо кнопки подпись, кто взял: нажать второй раз нельзя.
+ */
+export function assignmentButtons(leadId, { take = null, base = process.env.MINIAPP_URL } = {}) {
+  if (!leadId) return undefined;
+  const rows = [];
+  const fb = feedbackButton(leadId, { base });
+  if (fb) rows.push(fb.inline_keyboard[0]);
+  rows.push([take
+    ? { text: `✅ В работе: ${take.name || 'взято'}`, callback_data: `taken:${leadId}` }
+    : { text: '✅ Взял в работу', callback_data: `take:${leadId}` }]);
+  return { inline_keyboard: rows };
+}
+
+const TZ = process.env.DISPLAY_TZ || 'Asia/Tashkent';
+/** «11:34 18.09» по времени Ташкента: людям в уведомлении нужно местное, а не UTC базы. */
+export function fmtTime(iso) {
+  const d = iso ? new Date(String(iso).replace(' ', 'T') + (String(iso).endsWith('Z') ? '' : 'Z')) : new Date();
+  const p = new Intl.DateTimeFormat('ru-RU', { timeZone: TZ, hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })
+    .formatToParts(d).reduce((o, x) => (o[x.type] = x.value, o), {});
+  return `${p.hour}:${p.minute} ${p.day}.${p.month}`;
+}
+
+export function buildTakenText(lead, take) {
+  return [
+    '✅ <b>Взято в работу</b>',
+    '',
+    `<b>${escape(lead.company)}</b>`,
+    `${escape(take.name || 'Участник команды')} взял(а) в работу в ${fmtTime(take.taken_at)}`,
+  ].join('\n');
+}
+
+/**
+ * Нажали «Взял в работу». Взять может любой активный участник команды, которой
+ * назначена компания. Остальным участникам уходит уведомление с цитатой их
+ * исходного сообщения о назначении — видно, о какой компании речь, без поиска по чату.
+ */
+export function takeLead(db, leadId, chatId) {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
+  if (!lead) return { ok: false, reason: 'not_found' };
+
+  const existing = db.prepare('SELECT * FROM lead_takes WHERE lead_id = ?').get(leadId);
+  if (existing) return { ok: false, reason: 'taken', take: existing };
+
+  const member = lead.assigned_team ? db.prepare(
+    'SELECT * FROM team_members WHERE team_id = ? AND telegram_chat_id = ? AND active = 1 ORDER BY id LIMIT 1'
+  ).get(lead.assigned_team, String(chatId)) : null;
+  if (!member) return { ok: false, reason: 'not_member' };
+
+  const name = member.name || member.argus_user_id;
+  db.prepare('INSERT INTO lead_takes (lead_id, team_id, member_id, chat_id, name) VALUES (?, ?, ?, ?, ?)')
+    .run(leadId, lead.assigned_team, member.id, String(chatId), name);
+  const take = db.prepare('SELECT * FROM lead_takes WHERE lead_id = ?').get(leadId);
+  logEvent(db, { leadId, teamId: lead.assigned_team, kind: 'taken', data: { by: member.argus_user_id, name } });
+
+  const others = db.prepare(
+    'SELECT * FROM team_members WHERE team_id = ? AND active = 1 AND id != ? AND telegram_chat_id IS NOT NULL ORDER BY id'
+  ).all(lead.assigned_team, member.id);
+  const text = buildTakenText(lead, take);
+  let queued = 0;
+  for (const m of others) {
+    const exists = db.prepare("SELECT 1 FROM tg_outbox WHERE lead_id = ? AND member_id = ? AND kind = 'taken'").get(leadId, m.id);
+    if (exists) continue;
+    // Цитируем то самое уведомление о назначении, которое пришло этому человеку.
+    const origin = db.prepare(
+      "SELECT message_id FROM tg_outbox WHERE lead_id = ? AND member_id = ? AND kind = 'assign' AND state = 'sent' AND message_id IS NOT NULL LIMIT 1"
+    ).get(leadId, m.id);
+    db.prepare(
+      "INSERT INTO tg_outbox (lead_id, team_id, member_id, chat_id, text, kind, reply_to) VALUES (?, ?, ?, ?, ?, 'taken', ?)"
+    ).run(leadId, lead.assigned_team, m.id, String(m.telegram_chat_id), text, origin?.message_id ?? null);
+    queued++;
+  }
+  return { ok: true, take, queued };
+}
+
+/** Уведомления о назначении, которые уже ушли людям, — чтобы погасить у них кнопку «Взял». */
+export const sentAssignments = (db, leadId) => db.prepare(
+  "SELECT chat_id, message_id FROM tg_outbox WHERE lead_id = ? AND kind = 'assign' AND state = 'sent' AND message_id IS NOT NULL"
+).all(leadId);
+
+/** Что ответить на нажатие кнопки и как поменять кнопки: чистая функция, чтобы тестировать без сети. */
+export function handleCallback(db, { chatId, data }) {
+  const m = /^(take|taken):(\d+)$/.exec(String(data || ''));
+  if (!m) return { answer: null };
+  const leadId = Number(m[2]);
+  if (m[1] === 'taken') {
+    const take = db.prepare('SELECT * FROM lead_takes WHERE lead_id = ?').get(leadId);
+    return { answer: take ? `Уже в работе у ${take.name} с ${fmtTime(take.taken_at)}` : 'Компания ещё не взята', alert: false };
+  }
+  const res = takeLead(db, leadId, chatId);
+  if (res.ok) return { answer: 'Взято в работу. Команде сообщил.', alert: false, take: res.take, leadId, queued: res.queued };
+  if (res.reason === 'taken') return { answer: `Уже взял(а) ${res.take.name} в ${fmtTime(res.take.taken_at)}`, alert: true, take: res.take, leadId };
+  if (res.reason === 'not_member') return { answer: 'Вы не в команде, которой назначена эта компания.', alert: true };
+  return { answer: 'Компания не найдена.', alert: true };
+}
+
+/**
  * Поставить уведомления в очередь: получателю — «вам назначено», остальным активным — к сведению.
  * Повторно по той же строке и тому же человеку не ставим: воркер мог только упасть, а не задвоить.
  */
@@ -68,7 +166,7 @@ export function enqueueAssignment(db, leadId, teamId) {
   for (const member of members) {
     if (!member.telegram_chat_id) { skipped++; continue; }
     const exists = db.prepare(
-      'SELECT 1 FROM tg_outbox WHERE lead_id = ? AND member_id = ?'
+      "SELECT 1 FROM tg_outbox WHERE lead_id = ? AND member_id = ? AND kind = 'assign'"
     ).get(leadId, member.id);
     if (exists) continue;
 
@@ -161,12 +259,16 @@ export async function flushNotifications(db, { limit = 20, send = sendMessage } 
   for (const row of rows) {
     const attempts = row.attempts + 1;
     try {
-      // Кнопка фидбэка — только под уведомлением участнику команды. Сигнал о чужой
-      // компании (member_id пустой) уходит без неё: лид не его, фидбэк по нему не нужен.
-      await send(row.chat_id, row.text,
-        { replyMarkup: row.member_id ? feedbackButton(row.lead_id) : undefined });
-      db.prepare("UPDATE tg_outbox SET state = 'sent', attempts = ?, sent_at = ?, last_error = NULL WHERE id = ?")
-        .run(attempts, nowIso(), row.id);
+      // Кнопки — только под уведомлением о назначении участнику команды. Сигнал о чужой
+      // компании (member_id пустой) и «взято в работу» уходят без них.
+      const take = row.member_id && row.kind === 'assign'
+        ? db.prepare('SELECT * FROM lead_takes WHERE lead_id = ?').get(row.lead_id) : null;
+      const result = await send(row.chat_id, row.text, {
+        replyMarkup: row.member_id && row.kind === 'assign' ? assignmentButtons(row.lead_id, { take }) : undefined,
+        replyTo: row.reply_to || undefined,
+      });
+      db.prepare("UPDATE tg_outbox SET state = 'sent', attempts = ?, sent_at = ?, last_error = NULL, message_id = ? WHERE id = ?")
+        .run(attempts, nowIso(), result?.message_id != null ? String(result.message_id) : null, row.id);
       sent++;
     } catch (err) {
       failed++;
@@ -219,14 +321,20 @@ export function bindByLogin(db, chatId, text) {
  * Копим у себя, потому что телеграм держит непрочитанное только сутки:
  * человек нажал «Старт» в пятницу — в понедельник его уже не найти.
  */
-export async function collectContacts(db, { fetch: fetchUpdates = getUpdates, send = sendMessage } = {}) {
+export async function collectContacts(db, {
+  fetch: fetchUpdates = getUpdates, send = sendMessage, answer = answerCallback, editMarkup = editReplyMarkup,
+} = {}) {
   const state = db.prepare('SELECT last_update_id FROM tg_state WHERE id = 1').get();
   const updates = await fetchUpdates((state?.last_update_id || 0) + 1);
-  if (!updates.length) return { seen: 0, added: 0 };
+  if (!updates.length) return { seen: 0, added: 0, taken: 0 };
 
-  let added = 0, maxId = state?.last_update_id || 0;
+  let added = 0, taken = 0, maxId = state?.last_update_id || 0;
   for (const u of updates) {
     maxId = Math.max(maxId, u.update_id || 0);
+    if (u.callback_query) {
+      taken += await onCallback(db, u.callback_query, { answer, editMarkup });
+      continue;
+    }
     const from = u.message?.from || u.my_chat_member?.from;
     const chat = u.message?.chat || u.my_chat_member?.chat;
     if (!from || !chat || from.is_bot) continue;
@@ -249,7 +357,23 @@ export async function collectContacts(db, { fetch: fetchUpdates = getUpdates, se
     }
   }
   db.prepare('UPDATE tg_state SET last_update_id = ? WHERE id = 1').run(maxId);
-  return { seen: updates.length, added };
+  return { seen: updates.length, added, taken };
+}
+
+/** Нажатие кнопки: записать, ответить нажавшему, погасить кнопку у всех, кому уходило назначение. */
+async function onCallback(db, cq, { answer, editMarkup }) {
+  const chatId = String(cq.message?.chat?.id ?? cq.from?.id ?? '');
+  const res = handleCallback(db, { chatId, data: cq.data });
+  if (res.answer) {
+    try { await answer(cq.id, { text: res.answer, alert: res.alert }); } catch { /* ответ на кнопку не критичен */ }
+  }
+  if (!res.take) return 0;
+  // Кнопки меняем у всех: кто бы ни открыл своё уведомление, увидит, что компания уже в работе.
+  const markup = assignmentButtons(res.leadId, { take: res.take });
+  for (const row of sentAssignments(db, res.leadId)) {
+    try { await editMarkup(row.chat_id, row.message_id, markup); } catch { /* сообщение могли удалить */ }
+  }
+  return res.queued ? 1 : 0;
 }
 
 const REPEAT_SILENCE_SEC = 60;

@@ -241,7 +241,8 @@ function renderLeads() {
       <td><span class="tag ${l.status}">${l.status}</span>
         ${l.quarantine_reason ? `<div class="dim">${esc(l.quarantine_reason)}</div>` : ''}
         ${l.decline_count ? `<div class="dim">отказов: ${l.decline_count}</div>` : ''}</td>
-      <td>${when(l.assigned_at)}</td>
+      <td>${when(l.assigned_at)}
+        ${l.taken ? `<div class="dim">✅ взял: ${esc(l.taken.name)}, ${when(l.taken.taken_at)}</div>` : ''}</td>
       <td>${when(l.status_changed_at)}<div class="${l.age_hours > 24 ? 'stale' : 'dim'}">${age(l.age_hours)}</div></td>
       <td>${esc(l.team_name || '—')}
         ${l.assignments.length > 1 ? `<div class="dim">${l.assignments.map(a => esc(a.team_name) + ' — ' + a.state).join(', ')}</div>` : ''}</td>

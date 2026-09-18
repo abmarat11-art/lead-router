@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openMigrated } from '../src/db/index.js';
 import { addMember, teamHistory } from '../src/core/teams.js';
-import { enqueueAssignment, flushNotifications, buildText, companyLinks, collectContacts, knownContacts, bindByLogin } from '../src/core/notify.js';
+import { enqueueAssignment, flushNotifications, buildText, companyLinks, collectContacts, knownContacts, bindByLogin, takeLead, handleCallback, assignmentButtons, buildTakenText } from '../src/core/notify.js';
 
 function setup() {
   const db = openMigrated(':memory:');
@@ -115,7 +115,7 @@ test('кто написал боту — запоминается у нас, а 
     fetch: async () => updates,
     send: async (chat, text) => sent.push({ chat, text }),
   });
-  assert.deepEqual(out, { seen: 2, added: 2 });
+  assert.deepEqual(out, { seen: 2, added: 2, taken: 0 });
   assert.equal(sent.length, 2, 'человеку подтверждаем, что нажатие сработало');
 
   const list = knownContacts(db);
@@ -254,4 +254,140 @@ test('сигнал о чужой компании уходит без кнопк
   await flushNotifications(db, { send: async (chat, text, opts) => { seen.push({ chat, opts }); } });
   assert.equal(seen[0].opts.replyMarkup, undefined);
   delete process.env.MINIAPP_URL;
+});
+
+// ---- «Взял в работу» ----
+
+function teamOfThree(db) {
+  const a = addMember(db, 1, { argus_user_id: 'bekhruz', name: 'Бехруз Тамиров', role: 'assignee', telegram_chat_id: '111' });
+  const b = addMember(db, 1, { argus_user_id: 'artem', name: 'Артём Лугнов', telegram_chat_id: '222' });
+  const c = addMember(db, 1, { argus_user_id: 'nobody', name: 'Без телеграма' });
+  return { a, b, c };
+}
+
+test('под назначением две кнопки: фидбэк и «Взял в работу»', () => {
+  process.env.MINIAPP_URL = 'https://lidgen.example';
+  const kb = assignmentButtons(1).inline_keyboard;
+  assert.equal(kb.length, 2);
+  assert.match(kb[0][0].text, /фидбэк/);
+  assert.equal(kb[1][0].callback_data, 'take:1');
+  delete process.env.MINIAPP_URL;
+  // без мини-аппа — только «Взял»
+  assert.equal(assignmentButtons(1).inline_keyboard.length, 1);
+  // компания взята — кнопка превращается в подпись
+  const done = assignmentButtons(1, { take: { name: 'Бехруз Тамиров' } }).inline_keyboard[0][0];
+  assert.equal(done.callback_data, 'taken:1');
+  assert.match(done.text, /Бехруз/);
+});
+
+test('отправка запоминает message_id — потом это сообщение цитируем', async () => {
+  const db = setup();
+  teamOfThree(db);
+  enqueueAssignment(db, 1, 1);
+  let n = 500;
+  await flushNotifications(db, { send: async () => ({ message_id: ++n }) });
+  const rows = db.prepare("SELECT chat_id, message_id FROM tg_outbox WHERE kind = 'assign' ORDER BY id").all().map((r) => ({ ...r }));
+  assert.deepEqual(rows, [{ chat_id: '111', message_id: '501' }, { chat_id: '222', message_id: '502' }]);
+});
+
+test('взял в работу — остальным уходит уведомление с цитатой их назначения', async () => {
+  const db = setup();
+  const { a } = teamOfThree(db);
+  enqueueAssignment(db, 1, 1);
+  let n = 500;
+  await flushNotifications(db, { send: async () => ({ message_id: ++n }) });
+
+  const res = takeLead(db, 1, '111');
+  assert.equal(res.ok, true);
+  assert.equal(res.take.member_id, a);
+  assert.equal(res.take.name, 'Бехруз Тамиров');
+  assert.equal(res.queued, 1, 'Артёму — да, взявшему и человеку без телеграма — нет');
+
+  const row = db.prepare("SELECT * FROM tg_outbox WHERE kind = 'taken'").get();
+  assert.equal(row.chat_id, '222');
+  assert.equal(row.reply_to, '502', 'цитата — сообщение о назначении именно Артёма');
+  assert.match(row.text, /Бехруз Тамиров взял\(а\) в работу в \d\d:\d\d \d\d\.\d\d/);
+  assert.match(row.text, /ООО Ромашка/);
+
+  const sent = [];
+  await flushNotifications(db, { send: async (chat, text, opts) => { sent.push({ chat, opts }); return { message_id: 1 }; } });
+  assert.equal(sent[0].opts.replyTo, '502');
+  assert.equal(sent[0].opts.replyMarkup, undefined, 'под «взято» кнопок нет');
+
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM events WHERE kind = 'taken' AND lead_id = 1").get().c, 1);
+});
+
+test('второе нажатие не перезаписывает первого взявшего', () => {
+  const db = setup();
+  teamOfThree(db);
+  assert.equal(takeLead(db, 1, '222').ok, true, 'взять может любой участник команды, не только получатель');
+  const again = takeLead(db, 1, '111');
+  assert.equal(again.ok, false);
+  assert.equal(again.reason, 'taken');
+  assert.equal(again.take.name, 'Артём Лугнов');
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM lead_takes').get().c, 1);
+});
+
+test('чужой команде и незнакомому чату кнопка не работает', () => {
+  const db = setup();
+  teamOfThree(db);
+  db.prepare("INSERT INTO teams (id, name, queue_order) VALUES (2, 'Команда 2', 2)").run();
+  addMember(db, 2, { argus_user_id: 'x', name: 'Чужой', telegram_chat_id: '999' });
+  assert.equal(takeLead(db, 1, '999').reason, 'not_member');
+  assert.equal(takeLead(db, 1, '777').reason, 'not_member');
+  assert.equal(takeLead(db, 42, '111').reason, 'not_found');
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM tg_outbox WHERE kind = 'taken'").get().c, 0);
+});
+
+test('нажатие кнопки в телеграме: ответ нажавшему, кнопки гаснут у всех, повтор — «уже взял»', async () => {
+  const db = setup();
+  teamOfThree(db);
+  enqueueAssignment(db, 1, 1);
+  let n = 500;
+  await flushNotifications(db, { send: async () => ({ message_id: ++n }) });
+
+  const answers = [], edits = [];
+  const cq = (id, chat, data) => ({ update_id: id, callback_query: {
+    id: `cb${id}`, data, from: { id: Number(chat), first_name: 'x' }, message: { chat: { id: Number(chat) }, message_id: 1 } } });
+
+  const out = await collectContacts(db, {
+    fetch: async () => [cq(30, '111', 'take:1')],
+    send: async () => {},
+    answer: async (id, o) => answers.push({ id, ...o }),
+    editMarkup: async (chat, mid, markup) => edits.push({ chat, mid, btn: markup.inline_keyboard.at(-1)[0].text }),
+  });
+  assert.deepEqual(out, { seen: 1, added: 0, taken: 1 });
+  assert.match(answers[0].text, /Взято в работу/);
+  assert.deepEqual(edits.map((e) => [e.chat, e.mid]).sort(), [['111', '501'], ['222', '502']], 'кнопка гаснет у обоих');
+  assert.match(edits[0].btn, /В работе: Бехруз/);
+
+  // Артём жмёт следом — всплывашка, кто уже взял; ничего не дублируется
+  answers.length = 0;
+  await collectContacts(db, {
+    fetch: async () => [cq(31, '222', 'take:1'), cq(32, '222', 'taken:1')],
+    send: async () => {}, answer: async (id, o) => answers.push(o), editMarkup: async () => {},
+  });
+  assert.match(answers[0].text, /Уже взял\(а\) Бехруз Тамиров/);
+  assert.equal(answers[0].alert, true);
+  assert.match(answers[1].text, /Уже в работе у Бехруз/);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM tg_outbox WHERE kind = 'taken'").get().c, 1);
+  assert.equal(db.prepare('SELECT last_update_id FROM tg_state').get().last_update_id, 32);
+});
+
+test('уведомление о назначении после взятия сразу идёт с погашенной кнопкой', async () => {
+  const db = setup();
+  teamOfThree(db);
+  takeLead(db, 1, '111');
+  enqueueAssignment(db, 1, 1);
+  const sent = [];
+  await flushNotifications(db, { send: async (chat, text, opts) => { sent.push({ chat, kb: opts.replyMarkup }); return {}; } });
+  const assign = sent.filter((x) => x.kb);
+  assert.equal(assign.length, 2, 'назначение ушло обоим, раннее «взято» его не гасит');
+  assert.match(assign[0].kb.inline_keyboard.at(-1)[0].text, /В работе: Бехруз/);
+});
+
+test('кнопка с мусорными данными не ломает обработку', () => {
+  const db = setup();
+  assert.deepEqual(handleCallback(db, { chatId: '1', data: 'drop table' }), { answer: null });
+  assert.equal(buildTakenText({ company: 'A<B' }, { name: null, taken_at: '2026-09-18 06:34:00' }).includes('A&lt;B'), true);
 });

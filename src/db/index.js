@@ -17,11 +17,16 @@ export function migrate(db) {
   db.exec(readFileSync(join(ROOT, 'migrations', '001_init.sql'), 'utf8'));
   db.exec(readFileSync(join(ROOT, 'migrations', '002_telegram.sql'), 'utf8'));
   db.exec(readFileSync(join(ROOT, 'migrations', '003_feedback.sql'), 'utf8'));
+  db.exec(readFileSync(join(ROOT, 'migrations', '004_take.sql'), 'utf8'));
   // Колонки добавляем отдельно: ALTER TABLE не умеет IF NOT EXISTS,
   // а migrate() выполняется на каждом старте.
   addColumn(db, 'team_members', 'telegram_chat_id', 'TEXT');
   addColumn(db, 'tg_contacts', 'last_reply', 'TEXT');
   addColumn(db, 'tg_contacts', 'last_reply_at', 'TEXT');
+  // assign — назначение (с кнопками), taken — «взял в работу» (цитирует назначение), duplicate — чужая компания
+  addColumn(db, 'tg_outbox', 'kind', "TEXT NOT NULL DEFAULT 'assign'");
+  addColumn(db, 'tg_outbox', 'message_id', 'TEXT');      // id отправленного сообщения — чтобы потом его цитировать
+  addColumn(db, 'tg_outbox', 'reply_to', 'TEXT');        // какое сообщение цитировать при отправке
   return db;
 }
 

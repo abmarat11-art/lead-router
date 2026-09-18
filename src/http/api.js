@@ -261,6 +261,8 @@ const decorate = (db) => (lead) => ({
   assignments: db.prepare(
     'SELECT a.*, t.name team_name FROM assignments a JOIN teams t ON t.id = a.team_id WHERE a.lead_id = ? ORDER BY a.id'
   ).all(lead.id),
+  // кто нажал «Взял в работу» в телеграме
+  taken: db.prepare('SELECT name, taken_at FROM lead_takes WHERE lead_id = ?').get(lead.id) ?? null,
 });
 
 export function stats(db) {
