@@ -121,3 +121,15 @@ test('незнакомый ID Аргуса — лидген: сам попада
   await collectContacts(db, { fetch: async () => [msg(77, 'newlidgen', 4)], send: async (c, t) => sent.push(t) });
   assert.equal(db.prepare("SELECT COUNT(*) c FROM team_members WHERE argus_user_id = 'newlidgen'").get().c, 1);
 });
+
+test('кнопка «Перенос в Аргус» едет с ответами бота, слово с кнопки запускает перенос', async () => {
+  const db = setup();
+  const sent = [];
+  await collectContacts(db, {
+    fetch: async () => [msg(55, '/start', 1), msg(55, 'Перенос в Аргус', 2)],
+    send: async (chat, text, opts) => sent.push({ text, opts }),
+  });
+  assert.match(sent[0].text, /Вы привязаны/);
+  assert.equal(sent[0].opts.replyMarkup.keyboard[0][0].text, 'Перенос в Аргус');
+  assert.match(sent[1].text, /Пришлите ссылку/);
+});

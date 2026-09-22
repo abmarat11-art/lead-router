@@ -7,6 +7,11 @@ const ASK_LINK = 'Пришлите ссылку на компанию в Б24 �
   + 'вида https://acrm.site/crm/company/details/123/';
 const NOT_BOUND = 'Сначала привяжите свой ID Аргуса: пришлите его одним сообщением.';
 
+/** Постоянная клавиатура под полем ввода: одна кнопка, чтобы не искать команду за «/». */
+export const TRANSFER_KEYBOARD = {
+  keyboard: [[{ text: 'Перенос в Аргус' }]], resize_keyboard: true, is_persistent: true,
+};
+
 /** Из ссылки на карточку Б24 (или голого номера) достаём id компании. */
 export function parseB24CompanyLink(text) {
   const s = String(text ?? '').trim();
