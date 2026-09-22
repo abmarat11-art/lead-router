@@ -96,7 +96,7 @@ export function withAuth(handler) {
 
     // Мини-апп открывается из телеграма, куки у него нет: там своя проверка —
     // подпись initData токеном бота. Пускаем без сессии, но только эти адреса.
-    const miniapp = url.pathname === '/feedback.html' || url.pathname.startsWith('/api/miniapp/');
+    const miniapp = ['/feedback.html', '/transfer.html'].includes(url.pathname) || url.pathname.startsWith('/api/miniapp/');
     if (url.pathname === '/health' || url.pathname === '/login.html' || miniapp) return handler(req, res);
 
     const user = verifyToken(parseCookies(req.headers.cookie)[COOKIE]);
