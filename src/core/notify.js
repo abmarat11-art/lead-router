@@ -3,6 +3,7 @@
 import { sendMessage, getUpdates, answerCallback, editReplyMarkup } from '../adapters/telegram.js';
 import { logTeamChange } from './teams.js';
 import { logEvent } from './queue.js';
+import { handleTransferText } from './transfer.js';
 
 const BACKOFF_SEC = [0, 30, 120, 600, 3600];
 const nowIso = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -323,6 +324,7 @@ export function bindByLogin(db, chatId, text) {
  */
 export async function collectContacts(db, {
   fetch: fetchUpdates = getUpdates, send = sendMessage, answer = answerCallback, editMarkup = editReplyMarkup,
+  transfer = {},
 } = {}) {
   const state = db.prepare('SELECT last_update_id FROM tg_state WHERE id = 1').get();
   const updates = await fetchUpdates((state?.last_update_id || 0) + 1);
@@ -347,8 +349,15 @@ export async function collectContacts(db, {
       .run(String(chat.id), name, from.username || null);
 
     const text = u.message?.text || '';
-    const reply = answerFor(db, chat.id, text, known);
     if (!known) added++;
+    // Перенос компании из Б24: команда или ссылка на карточку. Ответ не гасим
+    // как повтор — каждая ссылка даёт свой результат.
+    const moved = await handleTransferText(db, chat.id, text, transfer);
+    if (moved.handled) {
+      try { await send(String(chat.id), moved.reply); } catch { /* заблокировал бота — не беда */ }
+      continue;
+    }
+    const reply = answerFor(db, chat.id, text, known);
     // Повтор гасим по времени, а не навсегда: стена одинаковых сообщений плоха,
     // но полное молчание человек читает как «бот сломался».
     if (reply && !justSaid(db, chat.id, reply)) {

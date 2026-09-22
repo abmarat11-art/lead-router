@@ -12,7 +12,7 @@ import { getConfig } from './core/columns.js';
 import { enrichPending } from './core/enrichment.js';
 import { deliverPending } from './core/argusDelivery.js';
 import { flushNotifications, collectContacts } from './core/notify.js';
-import { setMenuButton } from './adapters/telegram.js';
+import { setMenuButton, setCommands } from './adapters/telegram.js';
 
 loadEnv();
 
@@ -46,6 +46,12 @@ if (process.env.TELEGRAM_BOT_TOKEN && process.env.MINIAPP_URL) {
     .catch((err) => log('кнопка меню:', err.message));
 } else if (process.env.TELEGRAM_BOT_TOKEN) {
   log('MINIAPP_URL не задан — фидбэк из телеграма выключен');
+}
+// Команда «Перенос в Аргус»: сотрудник присылает ссылку на компанию Б24, бот заводит её в Аргусе на него.
+if (process.env.TELEGRAM_BOT_TOKEN) {
+  setCommands([{ command: 'transfer', description: 'Перенос в Аргус — компанию из Б24 по ссылке' }])
+    .then((ok) => log(ok ? 'команда /transfer в меню бота' : 'команды бота поставить не вышло'))
+    .catch((err) => log('команды бота:', err.message));
 }
 
 // --- фоновые циклы ---

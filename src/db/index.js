@@ -23,6 +23,7 @@ export function migrate(db) {
   addColumn(db, 'team_members', 'telegram_chat_id', 'TEXT');
   addColumn(db, 'tg_contacts', 'last_reply', 'TEXT');
   addColumn(db, 'tg_contacts', 'last_reply_at', 'TEXT');
+  addColumn(db, 'tg_contacts', 'mode', 'TEXT');           // 'transfer' — бот ждёт ссылку на компанию Б24
   // assign — назначение (с кнопками), taken — «взял в работу» (цитирует назначение), duplicate — чужая компания
   addColumn(db, 'tg_outbox', 'kind', "TEXT NOT NULL DEFAULT 'assign'");
   addColumn(db, 'tg_outbox', 'message_id', 'TEXT');      // id отправленного сообщения — чтобы потом его цитировать

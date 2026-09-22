@@ -83,3 +83,16 @@ export async function editReplyMarkup(chatId, messageId, replyMarkup, { fetchImp
   const data = await res.json().catch(() => ({}));
   return Boolean(data.ok);
 }
+
+/** Список команд бота (меню по «/»). Ставится один раз при старте. */
+export async function setCommands(commands, { fetchImpl = fetch } = {}) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return false;
+  const res = await fetchImpl(`${API}/bot${token}/setMyCommands`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ commands }),
+  });
+  const data = await res.json().catch(() => ({}));
+  return Boolean(data.ok);
+}
