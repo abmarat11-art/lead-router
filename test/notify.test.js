@@ -149,7 +149,7 @@ test('незнакомый ID — говорим прямо, а не молчи�
     fetch: async () => [{ update_id: 1, message: { from: { id: 55 }, chat: { id: 55 }, text: 'кто-то-левый' } }],
     send: async (chat, text) => sent.push(text),
   });
-  assert.match(sent[0], /Такого ID в списке команд нет/);
+  assert.match(sent[0], /не похоже на ID Аргуса/);
   assert.equal(db.prepare('SELECT COUNT(*) c FROM team_members WHERE telegram_chat_id IS NOT NULL').get().c, 0);
 });
 
@@ -205,12 +205,12 @@ test('одинаковый отказ подряд не шлём: человек
 
   await collectContacts(db, { fetch: async () => [upd(1, '/start')], send });
   await collectContacts(db, { fetch: async () => [upd(2, 'mail@example.com')], send });
-  await collectContacts(db, { fetch: async () => [upd(3, 'qwerty2801')], send });
+  await collectContacts(db, { fetch: async () => [upd(3, 'пароль2801')], send });
   await collectContacts(db, { fetch: async () => [upd(4, 'ещё попытка')], send });
 
   assert.equal(sent.length, 2, 'приветствие и один отказ — подряд не повторяемся');
   assert.match(sent[0], /ID в Аргусе/);
-  assert.match(sent[1], /Такого ID в списке команд нет/);
+  assert.match(sent[1], /не похоже на ID Аргуса/);
 });
 
 test('после отказов верный ID всё равно принимается', async () => {
@@ -233,13 +233,13 @@ test('через минуту молчания отвечаем снова: че
   const send = async (chat, text) => sent.push(text);
   const upd = (id, text) => ({ update_id: id, message: { from: { id: 5 }, chat: { id: 5 }, text } });
 
-  await collectContacts(db, { fetch: async () => [upd(1, 'karinatyo')], send });
-  await collectContacts(db, { fetch: async () => [upd(2, 'karinatyo')], send });
+  await collectContacts(db, { fetch: async () => [upd(1, 'карина@почта')], send });
+  await collectContacts(db, { fetch: async () => [upd(2, 'карина@почта')], send });
   assert.equal(sent.length, 1, 'сразу подряд — один ответ');
 
   // «прошла минута»
   db.prepare("UPDATE tg_contacts SET last_reply_at = datetime('now', '-2 minutes')").run();
-  await collectContacts(db, { fetch: async () => [upd(3, 'karinatyo')], send });
+  await collectContacts(db, { fetch: async () => [upd(3, 'карина@почта')], send });
   assert.equal(sent.length, 2, 'через минуту отвечаем снова');
 });
 

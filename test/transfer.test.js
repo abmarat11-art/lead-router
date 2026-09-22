@@ -97,3 +97,27 @@ test('обычный логин по-прежнему привязывает, п
   const r = await transferCompany(db, { chatId: 55, b24Id: '1' }, { fetchCompany: async () => company, ensureCompany: async () => ({ id: 'a', created: true, matched: false }) });
   assert.match(r, /Готово/);
 });
+
+test('незнакомый ID Аргуса — лидген: сам попадает в команду «Лидгены» вне очереди и может переносить', async () => {
+  const db = openMigrated(':memory:');
+  db.prepare('INSERT INTO teams (id, name, queue_order) VALUES (1, ?, 1)').run('Команда 1');
+  const sent = [];
+  await collectContacts(db, {
+    fetch: async () => [msg(77, '/start', 1), msg(77, 'newlidgen', 2), msg(77, 'https://acrm.site/crm/company/details/5/', 3)],
+    send: async (chat, text) => sent.push(text),
+    transfer: {
+      fetchCompany: async () => company,
+      ensureCompany: async (c, placement) => { assert.equal(placement.assignedById, 'newlidgen'); return { id: 'arg-2', created: true, matched: false, contacts: { added: 0, skipped: 1, errors: [] } }; },
+    },
+  });
+  assert.match(sent[1], /ID <b>newlidgen<\/b> привязан/);
+  assert.match(sent[2], /Готово/);
+  const team = db.prepare("SELECT * FROM teams WHERE name = 'Лидгены'").get();
+  assert.equal(team.active, 0, 'в очередь не попадает');
+  const m = db.prepare("SELECT * FROM team_members WHERE argus_user_id = 'newlidgen'").get();
+  assert.equal(m.team_id, team.id);
+  assert.equal(m.telegram_chat_id, '77');
+  // повторная отправка того же ID — не дубль
+  await collectContacts(db, { fetch: async () => [msg(77, 'newlidgen', 4)], send: async (c, t) => sent.push(t) });
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM team_members WHERE argus_user_id = 'newlidgen'").get().c, 1);
+});

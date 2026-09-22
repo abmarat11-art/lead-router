@@ -291,7 +291,9 @@ const ASK_LOGIN = 'Здравствуйте! Это бот уведомлени�
   + 'Пароль и почту присылать не нужно.';
 const BOUND = (name, team) => `Готово, ${name}. Вы в команде «${team}».\n`
   + 'Сюда будут приходить компании, назначенные команде, со ссылками на карточки.';
-const NOT_FOUND = 'Такого ID в списке команд нет.\n\n'
+const SELF_BOUND = (login) => `Готово, ID <b>${login}</b> привязан.\n`
+  + 'Чтобы перенести компанию из Б24 в Аргус: /transfer и пришлите ссылку на карточку.';
+const NOT_FOUND = 'Это не похоже на ID Аргуса.\n\n'
   + 'Нужен именно ID сотрудника из Аргуса — не почта и не пароль. '
   + 'Откройте свою страницу сотрудника в Аргусе и скопируйте ID кнопкой.\n'
   + 'Если ID верный — напишите руководителю, возможно вас ещё не добавили в команду.';
@@ -300,6 +302,19 @@ const NOT_FOUND = 'Такого ID в списке команд нет.\n\n'
  * Человек прислал логин Аргуса — привязываем его чат к участнику команды.
  * Так руководителю не нужно вручную переносить chat id из списка в карточку.
  */
+export const LIDGEN_TEAM = 'Лидгены';
+/** Служебная команда лидгенов: не в очереди (active=0), лидов не получает. Создаётся при первом обращении. */
+export function lidgenTeam(db) {
+  const row = db.prepare('SELECT id FROM teams WHERE name = ?').get(LIDGEN_TEAM);
+  if (row) return row.id;
+  const info = db.prepare('INSERT INTO teams (name, queue_order, active) VALUES (?, 99, 0)').run(LIDGEN_TEAM);
+  const id = Number(info.lastInsertRowid);
+  logTeamChange(db, id, 'team_created', { name: LIDGEN_TEAM, queue_order: 99, active: 0, by: 'бот' });
+  return id;
+}
+// ID Аргуса — короткое имя латиницей/цифрами или код через дефисы; русский текст и ссылки — нет.
+const looksLikeArgusId = (s) => /^[a-z0-9][a-z0-9._-]{1,63}$/i.test(s);
+
 export function bindByLogin(db, chatId, text) {
   const login = String(text ?? '').trim();
   if (!login || login.startsWith('/')) return null;
@@ -307,7 +322,20 @@ export function bindByLogin(db, chatId, text) {
   const member = db.prepare(`
     SELECT m.*, t.name team_name FROM team_members m JOIN teams t ON t.id = m.team_id
     WHERE lower(trim(m.argus_user_id)) = lower(?) LIMIT 1`).get(login);
-  if (!member) return { ok: false };
+  // Незнакомый ID — это лидген: их в Аргусе завели, а в команды не вписывают.
+  // Вписываем сами в служебную команду «Лидгены» — вне очереди, без назначений,
+  // но с правом переносить компании (/transfer). Опечатку в ID выявит первый же
+  // перенос: Аргус не примет ответственного, бот ответит ошибкой.
+  if (!member) {
+    if (!looksLikeArgusId(login)) return { ok: false };
+    const teamId = lidgenTeam(db);
+    const info = db.prepare(`INSERT INTO team_members (team_id, argus_user_id, role, telegram_chat_id)
+      VALUES (?, ?, 'notify', ?)`).run(teamId, login, String(chatId));
+    logTeamChange(db, teamId, 'member_added', { argus_user_id: login, telegram_bound: String(chatId), by: 'сам через бота' });
+    const created = db.prepare('SELECT m.*, t.name team_name FROM team_members m JOIN teams t ON t.id = m.team_id WHERE m.id = ?')
+      .get(Number(info.lastInsertRowid));
+    return { ok: true, member: created, self: true };
+  }
 
   db.prepare("UPDATE team_members SET telegram_chat_id = ?, updated_at = datetime('now') WHERE id = ?")
     .run(String(chatId), member.id);
@@ -406,6 +434,7 @@ function answerFor(db, chatId, text, known) {
   const bound = bindByLogin(db, chatId, clean);
   if (!bound) return null;
   if (!bound.ok) return NOT_FOUND;
+  if (bound.self) return SELF_BOUND(bound.member.argus_user_id);
   return BOUND(bound.member.name || bound.member.argus_user_id, bound.member.team_name);
 }
 
