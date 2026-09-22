@@ -8,9 +8,12 @@ const ASK_LINK = 'Пришлите ссылку на компанию в Б24 �
 const NOT_BOUND = 'Сначала привяжите свой ID Аргуса: пришлите его одним сообщением.';
 
 /** Постоянная клавиатура под полем ввода: одна кнопка, чтобы не искать команду за «/». */
-export const TRANSFER_KEYBOARD = {
-  keyboard: [[{ text: 'Перенос в Аргус' }]], resize_keyboard: true, is_persistent: true,
-};
+export function transferKeyboard() {
+  const base = process.env.MINIAPP_URL?.replace(/\/$/, '');
+  // С мини-аппом кнопка открывает окно с полем; без него — просто шлёт слово, и бот просит ссылку.
+  const button = base ? { text: 'Перенос в Аргус', web_app: { url: `${base}/transfer.html` } } : { text: 'Перенос в Аргус' };
+  return { keyboard: [[button]], resize_keyboard: true, is_persistent: true };
+}
 
 /** Из ссылки на карточку Б24 (или голого номера) достаём id компании. */
 export function parseB24CompanyLink(text) {

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Перенос в Аргус</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 15px/1.45 -apple-system, system-ui, sans-serif; margin: 0; padding: 16px;
+    background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #111);
+  }
+  h1 { font-size: 17px; margin: 0 0 12px; }
+  .dim { color: var(--tg-theme-hint-color, #8a8a8e); font-size: 13px; }
+  input {
+    width: 100%; box-sizing: border-box; padding: 12px; font: inherit; border-radius: 10px;
+    border: 1px solid var(--tg-theme-hint-color, #c7c7cc);
+    background: var(--tg-theme-bg-color, #fff); color: inherit;
+  }
+  .msg { margin-top: 12px; }
+  .bad { color: #d13c3c; }
+  .ok { color: #2e9e57; }
+  a { color: var(--tg-theme-link-color, #2481cc); }
+</style>
+</head>
+<body>
+<h1>Перенос в Аргус</h1>
+<input id="link" type="url" inputmode="url" placeholder="https://acrm.site/crm/company/details/123/" autofocus>
+<div class="dim" style="margin-top:6px">Ссылка на компанию в Б24 — как в адресной строке карточки. Компания и контакты заведутся в Аргусе на вас.</div>
+<div class="msg dim" id="msg"></div>
+
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand();
+const initData = tg?.initData || '';
+const msg = document.getElementById('msg');
+const say = (html, kind = 'dim') => { msg.className = 'msg ' + kind; msg.innerHTML = html; };
+const esc = (s) => String(s ?? '').replace(/[<>&]/g, c => ({ '<':'&lt;','>':'&gt;','&':'&amp;' }[c]));
+let busy = false;
+
+if (!initData) say('Откройте это окно кнопкой в боте — иначе я не знаю, кто переносит.', 'bad');
+else tg?.MainButton.setText('Перенести').show().onClick(send);
+
+async function send() {
+  if (busy) return;
+  const link = document.getElementById('link').value.trim();
+  if (!link) return say('Вставьте ссылку на компанию.', 'bad');
+  busy = true; tg?.MainButton.showProgress(); say('Переношу… это 5–15 секунд.');
+  try {
+    const res = await fetch('/api/miniapp/transfer', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-telegram-init-data': initData },
+      body: JSON.stringify({ link }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (d.error) { say(esc(d.error), 'bad'); tg?.HapticFeedback?.notificationOccurred('error'); return; }
+    say(esc(d.text) + (d.url ? `<br><a href="${esc(d.url)}" target="_blank">Открыть карточку в Аргусе</a>` : ''), 'ok');
+    tg?.HapticFeedback?.notificationOccurred('success');
+    document.getElementById('link').value = '';
+  } catch (err) {
+    say('Не вышло: ' + esc(err.message), 'bad');
+  } finally {
+    busy = false; tg?.MainButton.hideProgress();
+  }
+}
+document.getElementById('link').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
+</script>
+</body>
+</html>

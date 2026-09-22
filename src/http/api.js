@@ -83,7 +83,7 @@ export function createHandler(db, { importNow } = {}) {
           || (req.method === 'GET' ? url.searchParams.get('initData') : null);
         const who = identify(db, verifyInitData(
           initData ?? (req.method === 'POST' ? (miniBody = await readJson(req)).initData : null)));
-        if (!who) return json(res, 403, { error: 'Вас нет в списке команд — фидбэк принять не могу' });
+        if (!who) return json(res, 403, { error: 'Вы ещё не привязаны: пришлите боту свой ID из Аргуса одним сообщением.' });
 
         if (req.method === 'GET' && p === '/api/miniapp/context') {
           return json(res, 200, {
@@ -98,6 +98,23 @@ export function createHandler(db, { importNow } = {}) {
           } catch (err) {
             return json(res, 400, { error: String(err.message || err) });
           }
+        }
+        // Перенос компании из Б24 в Аргус — то же, что ссылка в чат боту, но из окна с полем.
+        if (req.method === 'POST' && p === '/api/miniapp/transfer') {
+          const b = miniBody ?? await readJson(req);
+          const { transferCompany, parseB24CompanyLink } = await import('../core/transfer.js');
+          const b24Id = parseB24CompanyLink(b.link);
+          if (!b24Id) return json(res, 400, { error: 'Это не похоже на ссылку Б24: нужна ссылка вида https://acrm.site/crm/company/details/123/' });
+          const chatId = who.member.telegram_chat_id;
+          const text = await transferCompany(db, { chatId, b24Id });
+          // Результат дублируем в чат: в истории бота останется ссылка на карточку.
+          if (process.env.TELEGRAM_BOT_TOKEN) {
+            const { sendMessage } = await import('../adapters/telegram.js');
+            sendMessage(chatId, text).catch(() => {});
+          }
+          const ok = text.startsWith('Готово') || text.includes('уже есть в Аргусе');
+          const m = text.match(/href="([^"]+)"/);
+          return json(res, ok ? 200 : 400, ok ? { ok: true, text: text.replace(/<[^>]+>/g, ''), url: m?.[1] || null } : { error: text });
         }
         return json(res, 404, { error: 'not found' });
       }

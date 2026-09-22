@@ -3,7 +3,7 @@
 import { sendMessage, getUpdates, answerCallback, editReplyMarkup } from '../adapters/telegram.js';
 import { logTeamChange } from './teams.js';
 import { logEvent } from './queue.js';
-import { handleTransferText, TRANSFER_KEYBOARD } from './transfer.js';
+import { handleTransferText, transferKeyboard } from './transfer.js';
 
 const BACKOFF_SEC = [0, 30, 120, 600, 3600];
 const nowIso = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -293,7 +293,7 @@ const BOUND = (name, team) => `Готово, ${name}. Вы в команде «$
   + 'Сюда будут приходить компании, назначенные команде, со ссылками на карточки.';
 const SELF_BOUND = (login) => `Готово, ID <b>${login}</b> привязан.\n`
   + 'Чтобы перенести компанию из Б24 в Аргус: /transfer и пришлите ссылку на карточку.';
-const HELLO_BOUND = 'Вы привязаны. Кнопка «Перенос в Аргус» внизу — пришлите ссылку на компанию Б24, и она заведётся в Аргусе на вас.';
+const HELLO_BOUND = 'Вы привязаны. Кнопка «Перенос в Аргус» внизу: вставьте ссылку на компанию Б24 — она заведётся в Аргусе на вас.';
 const isBound = (db, chatId) => !!db.prepare('SELECT 1 FROM team_members WHERE telegram_chat_id = ? AND active = 1').get(String(chatId));
 const NOT_FOUND = 'Это не похоже на ID Аргуса.\n\n'
   + 'Нужен именно ID сотрудника из Аргуса — не почта и не пароль. '
@@ -384,7 +384,7 @@ export async function collectContacts(db, {
     // как повтор — каждая ссылка даёт свой результат.
     const moved = await handleTransferText(db, chat.id, text, transfer);
     if (moved.handled) {
-      try { await send(String(chat.id), moved.reply, { replyMarkup: TRANSFER_KEYBOARD }); } catch { /* заблокировал бота — не беда */ }
+      try { await send(String(chat.id), moved.reply, { replyMarkup: transferKeyboard() }); } catch { /* заблокировал бота — не беда */ }
       continue;
     }
     const reply = answerFor(db, chat.id, text, known);
@@ -392,7 +392,7 @@ export async function collectContacts(db, {
     // но полное молчание человек читает как «бот сломался».
     if (reply && !justSaid(db, chat.id, reply)) {
       // Кнопка «Перенос в Аргус» едет с каждым ответом бота: у кого её ещё нет — появится.
-      try { await send(String(chat.id), reply, { replyMarkup: TRANSFER_KEYBOARD }); } catch { /* заблокировал бота — не беда */ }
+      try { await send(String(chat.id), reply, { replyMarkup: transferKeyboard() }); } catch { /* заблокировал бота — не беда */ }
       rememberReply(db, chat.id, reply);
     }
   }

@@ -131,5 +131,9 @@ test('кнопка «Перенос в Аргус» едет с ответами
   });
   assert.match(sent[0].text, /Вы привязаны/);
   assert.equal(sent[0].opts.replyMarkup.keyboard[0][0].text, 'Перенос в Аргус');
+  process.env.MINIAPP_URL = 'https://lidgen.example/';
+  const { transferKeyboard } = await import('../src/core/transfer.js');
+  assert.equal(transferKeyboard().keyboard[0][0].web_app.url, 'https://lidgen.example/transfer.html', 'с мини-аппом кнопка открывает окно');
+  delete process.env.MINIAPP_URL;
   assert.match(sent[1].text, /Пришлите ссылку/);
 });
