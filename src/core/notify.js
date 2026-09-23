@@ -299,6 +299,8 @@ const NOT_FOUND = 'Это не похоже на ID Аргуса.\n\n'
   + 'Нужен именно ID сотрудника из Аргуса — не почта и не пароль. '
   + 'Откройте свою страницу сотрудника в Аргусе и скопируйте ID кнопкой.\n'
   + 'Если ID верный — напишите руководителю, возможно вас ещё не добавили в команду.';
+const TG_ID_SENT = 'Это ваш ID в телеграме, а нужен ID в Аргусе.\n\n'
+  + 'Откройте свою страницу сотрудника в Аргусе и скопируйте ID кнопкой — и пришлите его сюда.';
 
 /**
  * Человек прислал логин Аргуса — привязываем его чат к участнику команды.
@@ -330,7 +332,13 @@ export function bindByLogin(db, chatId, text) {
   // перенос: Аргус не примет ответственного, бот ответит ошибкой.
   if (!member) {
     if (!looksLikeArgusId(login)) return { ok: false };
+    // Частая путаница: присылают свой телеграмный ID вместо аргусовского.
+    if (login === String(chatId)) return { ok: false, tgId: true };
     const teamId = lidgenTeam(db);
+    // Прошлая самопривязка этого чата могла быть с опечаткой — гасим её,
+    // иначе перенос уйдёт по старому ID и Аргус снова скажет «такого сотрудника нет».
+    db.prepare(`UPDATE team_members SET active = 0, updated_at = datetime('now')
+      WHERE telegram_chat_id = ? AND team_id = ? AND active = 1`).run(String(chatId), teamId);
     const info = db.prepare(`INSERT INTO team_members (team_id, argus_user_id, role, telegram_chat_id)
       VALUES (?, ?, 'notify', ?)`).run(teamId, login, String(chatId));
     logTeamChange(db, teamId, 'member_added', { argus_user_id: login, telegram_bound: String(chatId), by: 'сам через бота' });
@@ -440,7 +448,7 @@ function answerFor(db, chatId, text, known) {
 
   const bound = bindByLogin(db, chatId, clean);
   if (!bound) return null;
-  if (!bound.ok) return NOT_FOUND;
+  if (!bound.ok) return bound.tgId ? TG_ID_SENT : NOT_FOUND;
   if (bound.self) return SELF_BOUND(bound.member.argus_user_id);
   return BOUND(bound.member.name || bound.member.argus_user_id, bound.member.team_name);
 }

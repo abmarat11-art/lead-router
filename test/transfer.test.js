@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { openMigrated } from '../src/db/index.js';
 import { addMember } from '../src/core/teams.js';
 import { collectContacts } from '../src/core/notify.js';
-import { parseB24CompanyLink, transferCompany } from '../src/core/transfer.js';
+import { parseB24CompanyLink, transferCompany, memberByChat } from '../src/core/transfer.js';
 
 function setup() {
   const db = openMigrated(':memory:');
@@ -136,4 +136,35 @@ test('кнопка «Перенос в Аргус» едет с ответами
   assert.equal(transferKeyboard().keyboard[0][0].web_app.url, 'https://lidgen.example/transfer.html', 'с мини-аппом кнопка открывает окно');
   delete process.env.MINIAPP_URL;
   assert.match(sent[1].text, /Пришлите ссылку/);
+});
+
+test('прислал телеграмный ID — бот не привязывает и объясняет, где брать аргусовский', async () => {
+  const db = setup();
+  const sent = [];
+  await collectContacts(db, {
+    fetch: async () => [msg(777123, '777123', 1)],
+    send: async (chat, text) => sent.push(text),
+  });
+  assert.match(sent.at(-1), /Это ваш ID в телеграме/);
+  assert.equal(db.prepare("SELECT count(*) n FROM team_members WHERE telegram_chat_id = '777123'").get().n, 0);
+});
+
+test('прислал ID повторно — работает последний, старая самопривязка гаснет', async () => {
+  const db = setup();
+  await collectContacts(db, { fetch: async () => [msg(90, '5582232602', 1)], send: async () => {} });
+  await collectContacts(db, { fetch: async () => [msg(90, 'd07972e2-22d0-4b07', 2)], send: async () => {} });
+  const active = db.prepare("SELECT argus_user_id FROM team_members WHERE telegram_chat_id = '90' AND active = 1").all();
+  assert.deepEqual(active.map((r) => r.argus_user_id), ['d07972e2-22d0-4b07']);
+  assert.equal(memberByChat(db, 90).argus_user_id, 'd07972e2-22d0-4b07');
+});
+
+test('Аргус не знает сотрудника — привязка снимается, бот просит ID заново', async () => {
+  const db = setup();
+  await collectContacts(db, { fetch: async () => [msg(91, 'opechatka', 1)], send: async () => {} });
+  const reply = await transferCompany(db, { chatId: 91, b24Id: '4021' }, {
+    fetchCompany: async () => company,
+    ensureCompany: async () => { throw new Error('Аргус companies.add: такого сотрудника нет'); },
+  });
+  assert.match(reply, /не знает сотрудника/);
+  assert.equal(db.prepare("SELECT count(*) n FROM team_members WHERE telegram_chat_id = '91' AND active = 1").get().n, 0);
 });

@@ -28,12 +28,23 @@ export function parseB24CompanyLink(text) {
 export const argusLink = (id) =>
   process.env.ARGUS_COMPANY_URL ? process.env.ARGUS_COMPANY_URL.replace('{id}', id) : `#${id}`;
 
-/** Участник команды по чату телеграма: только привязанный может переносить. */
+/**
+ * Участник команды по чату телеграма: только привязанный может переносить.
+ * Берём последнюю привязку: человек мог сперва прислать не тот ID (например свой
+ * телеграмный), а потом настоящий — работать должен тот, что прислан последним.
+ */
 export function memberByChat(db, chatId) {
   return db.prepare(`
     SELECT m.*, t.name team_name FROM team_members m JOIN teams t ON t.id = m.team_id
-    WHERE m.telegram_chat_id = ? AND m.active = 1 ORDER BY m.id LIMIT 1`).get(String(chatId));
+    WHERE m.telegram_chat_id = ? AND m.active = 1 ORDER BY m.id DESC LIMIT 1`).get(String(chatId));
 }
+
+const WRONG_ID = (login) => `Аргус не знает сотрудника <b>${login}</b> — похоже, это не тот ID.\n\n`
+  + 'Откройте свою страницу сотрудника в Аргусе, скопируйте ID кнопкой и пришлите его сюда одним сообщением. '
+  + 'Телеграмный ID и почта не подойдут.';
+
+/** Аргус ответил «такого сотрудника нет» — виноват привязанный ID, а не компания. */
+const blamesEmployee = (err) => /сотрудник/i.test(String(err?.message || ''));
 
 /** Режим «жду ссылку»: включается командой, гасится первой же ссылкой или любым другим текстом. */
 export function setMode(db, chatId, mode) {
@@ -72,6 +83,12 @@ export async function transferCompany(db, { chatId, b24Id }, deps = {}) {
     res = await ensure(company, { assignedById: member.argus_user_id, kind: 'lead' });
   } catch (err) {
     logEvent(db, 'bot_transfer_failed', { team_id: member.team_id, by: member.argus_user_id, b24_id: b24Id, error: String(err.message || err) });
+    // Сам себя привязал с опечаткой — снимаем привязку, чтобы человек прислал ID заново,
+    // иначе он будет биться в одну и ту же ошибку на каждой ссылке.
+    if (blamesEmployee(err) && member.role === 'notify' && member.team_name === 'Лидгены') {
+      db.prepare("UPDATE team_members SET active = 0, updated_at = datetime('now') WHERE id = ?").run(member.id);
+      return WRONG_ID(member.argus_user_id);
+    }
     return `Аргус не принял «${company.title || b24Id}»: ${err.message || err}`;
   }
 
