@@ -1,5 +1,4 @@
 import { enqueueAssignment, enqueueDuplicateAlert } from './notify.js';
-import { markDuplicate } from './queue.js';
 // Компания уехала в Аргус уже назначенной: заводим её на ответственного той команды,
 // которой очередь отдала строку, и сразу указываем тип — лид или встреча.
 // Компания с таким ИНН уже есть — берём её, дубль не плодим.
@@ -111,10 +110,10 @@ export async function deliverPending(db, { limit = 20, ensure, assign } = {}) {
         await assignCompany(id, { assignedById: lead.argus_user_id, kind: lead.kind, notifyIds });
       }
 
-      // Чужая компания. Ответственного не переписываем — забрать её значит отнять
-      // у того, кто с ней работает. Строка идёт как фрод: ход команде возвращается
-      // долгом, а руководителю команды ответственного уходит сигнал разобраться,
-      // почему она попала в лидогенерацию.
+      // Компания уже в Аргусе, и наша ли она — неизвестно: ASSIGNED_BY_ID в выдаче
+      // пустой. Ответственного не переписываем (забрать её значит отнять у того, кто
+      // с ней работает), но и строку не закрываем: решение Кости 02.10 — лид доходит
+      // до команды в любом случае, человек открывает карточку и разбирается сам.
       if (res.matched && !ours) {
         db.prepare(`UPDATE leads SET argus_state = 'matched', argus_attempts = ?, argus_error = NULL,
                       argus_company_id = ?, updated_at = ? WHERE id = ?`)
@@ -123,8 +122,8 @@ export async function deliverPending(db, { limit = 20, ensure, assign } = {}) {
           argus_company_id: id, responsible: res.responsible || null, skipped_assign: true,
         });
 
-        // Сигнал ставим в очередь до закрытия строки, но его срыв не должен оставить
-        // строку полузакрытой: долг и закрытие идут в любом случае, ошибка — в журнал.
+        // Сигнал руководителю ответственного — довесок: Аргус его пока не отдаёт,
+        // и срыв сигнала не должен мешать уведомлению команды.
         try {
           const alert = enqueueDuplicateAlert(db, lead.id, lead.assigned_team, {
             responsible: res.responsible, argusTitle: res.title,
@@ -133,7 +132,9 @@ export async function deliverPending(db, { limit = 20, ensure, assign } = {}) {
         } catch (err) {
           logEvent(db, lead.id, lead.assigned_team, 'duplicate_error', { error: String(err.message || err) });
         }
-        markDuplicate(db, lead.id);
+
+        const notified = enqueueAssignment(db, lead.id, lead.assigned_team, { alreadyInArgus: true });
+        if (notified.queued) logEvent(db, lead.id, lead.assigned_team, 'notify_queued', notified);
         matched++;
         continue;
       }

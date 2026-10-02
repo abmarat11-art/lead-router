@@ -182,7 +182,7 @@ test('адаптер Б24 собирает поля компании и конт
     'контакты забираются одним запросом, а не по одному');
 });
 
-test('компания уже в Аргусе: не переназначаем, ход не засчитан, сигнал руководителю', async () => {
+test('компания уже в Аргусе: не переназначаем, но лид доходит до команды', async () => {
   const db = setup();
   // Тагир ведёт компанию в Аргусе и состоит в команде 3; руководитель этой команды — Сардор.
   db.prepare("INSERT INTO team_members (team_id, argus_user_id, name, role, telegram_chat_id) VALUES (3, 'tagirsol', 'Тагир', 'notify', '111')").run();
@@ -199,17 +199,38 @@ test('компания уже в Аргусе: не переназначаем, 
 
   const lead = db.prepare('SELECT * FROM leads').get();
   assert.equal(lead.argus_state, 'matched');
-  assert.equal(lead.status, 'rejected', 'строка закрыта как фрод');
+  assert.equal(lead.status, 'assigned', 'строка остаётся у команды: решение за человеком');
   assert.equal(lead.argus_company_id, 'argus-77');
 
-  const debt = db.prepare('SELECT * FROM queue_priority WHERE consumed_at IS NULL').get();
-  assert.equal(debt.team_id, 1, 'ход команде 1 возвращается долгом');
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM queue_priority WHERE consumed_at IS NULL').get().c, 0,
+    'ход засчитан: лид команда получила, долга нет');
 
   const out = db.prepare('SELECT * FROM tg_outbox').all();
-  assert.equal(out.length, 1, 'уведомления о назначении нет, только сигнал');
+  assert.equal(out.length, 1, 'у команды 1 нет телеграма — только сигнал руководителю');
   assert.equal(out[0].chat_id, '222', 'пишем руководителю команды ответственного, не самому ответственному');
   assert.match(out[0].text, /уже ведётся в Аргусе/);
   assert.match(out[0].text, /tagirsol/);
+});
+
+test('дубль: команде уходит уведомление с пометкой, что компания уже в Аргусе', async () => {
+  const db = setup();
+  db.prepare("INSERT INTO team_members (team_id, argus_user_id, name, role, telegram_chat_id) VALUES (1, 'user-1', 'Азиз', 'assignee', '555')").run();
+
+  load(db, rowWithB24());
+  await enrichPending(db, { fetchCompany: async () => COMPANY });
+  dispatchQueue(db);
+
+  const assigned = [];
+  await deliverPending(db, {
+    ensure: async () => ({ id: 'argus-79', created: false, matched: true, responsible: 'tagirsol', title: 'ООО Ромашка' }),
+    assign: async (id, placement) => { assigned.push({ id, placement }); return true; },
+  });
+
+  assert.deepEqual(assigned, [], 'ответственного в Аргусе не переписываем');
+  const notice = db.prepare("SELECT * FROM tg_outbox WHERE chat_id = '555'").get();
+  assert.ok(notice, 'получатель команды получает лид');
+  assert.match(notice.text, /Вам назначено/);
+  assert.match(notice.text, /уже есть в Аргусе/);
 });
 
 test('ответственный не найден в командах — сигнал уходит в резервный чат', async () => {
@@ -297,8 +318,9 @@ test('чужая компания не попадает в «Отказы» ко
     ensure: async () => ({ id: 'argus-6', created: false, matched: true, responsible: 'tagirsol', title: 'ООО Ромашка' }),
   });
   const a = db.prepare('SELECT * FROM assignments').get();
-  assert.equal(a.state, 'cancelled', 'назначение отменено, а не отклонено командой');
+  assert.equal(a.state, 'pending', 'назначение остаётся в силе: лид у команды');
   assert.equal(db.prepare('SELECT decline_count c FROM leads').get().c, 0);
+  assert.equal(db.prepare('SELECT status FROM leads').get().status, 'assigned');
 });
 
 test('оборвалась связь после заведения — вторая попытка не считает свою компанию чужой', async () => {

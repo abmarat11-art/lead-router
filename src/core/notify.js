@@ -28,7 +28,7 @@ export function companyLinks(lead) {
   return links;
 }
 
-export function buildText(lead, team, { forAssignee }) {
+export function buildText(lead, team, { forAssignee, alreadyInArgus = false }) {
   const head = forAssignee
     ? `🎯 <b>Вам назначено: ${KIND_LABEL[lead.kind] || lead.kind}</b>`
     : `📣 <b>${KIND_LABEL[lead.kind] || lead.kind} в вашу команду</b>`;
@@ -37,6 +37,11 @@ export function buildText(lead, team, { forAssignee }) {
   if (lead.lead_gen) lines.push(`Лидоген: ${escape(lead.lead_gen)}`);
   lines.push(`Команда: ${escape(team.name)}`);
   if (!forAssignee) lines.push('Назначено на ответственного команды, вы — для информации.');
+  // Компания уже заведена в Аргусе. Ответственного там не трогали: может быть,
+  // с ней кто-то работает. Лид всё равно доходит до команды — решает человек.
+  if (alreadyInArgus) {
+    lines.push('', '⚠️ Компания уже есть в Аргусе — ответственного не меняли. Откройте карточку и проверьте, ведёт ли её кто-то.');
+  }
 
   const links = companyLinks(lead);
   if (links.length) lines.push('', links.join(' · '));
@@ -154,7 +159,7 @@ export function handleCallback(db, { chatId, data }) {
  * Поставить уведомления в очередь: получателю — «вам назначено», остальным активным — к сведению.
  * Повторно по той же строке и тому же человеку не ставим: воркер мог только упасть, а не задвоить.
  */
-export function enqueueAssignment(db, leadId, teamId) {
+export function enqueueAssignment(db, leadId, teamId, { alreadyInArgus = false } = {}) {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
   const team = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
   if (!lead || !team) return { queued: 0, skipped: 0 };
@@ -174,7 +179,7 @@ export function enqueueAssignment(db, leadId, teamId) {
     db.prepare(
       'INSERT INTO tg_outbox (lead_id, team_id, member_id, chat_id, text) VALUES (?, ?, ?, ?, ?)'
     ).run(leadId, teamId, member.id, String(member.telegram_chat_id),
-      buildText(lead, team, { forAssignee: member.role === 'assignee' }));
+      buildText(lead, team, { forAssignee: member.role === 'assignee', alreadyInArgus }));
     queued++;
   }
   return { queued, skipped };
